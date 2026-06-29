@@ -58,13 +58,14 @@ const getHome = async (req, res) => {
   }
 };
 
-console.log('getSchedule llamado - gymId:', gymId, 'date:', date, 'userId:', userId);
+
 // GET /api/usuario/schedule?date=
 const getSchedule = async (req, res) => {
   try {
     const gymId = req.gym.id;
     const userId = req.user.id;
     const { date = new Date().toISOString().split('T')[0] } = req.query;
+     console.log('getSchedule llamado - gymId:', gymId, 'date:', date, 'userId:', userId);
 
     // Generar instancias
     try {
