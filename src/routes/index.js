@@ -1,0 +1,190 @@
+const express = require('express');
+const router = express.Router();
+const { authenticate, requireRole, requireSuperAdmin, loadGym } = require('../middleware/auth');
+
+const authCtrl = require('../controllers/auth.controller');
+const superCtrl = require('../controllers/super.controller');
+const adminCtrl = require('../controllers/admin.controller');
+const receptionCtrl = require('../controllers/reception.controller');
+const userCtrl = require('../controllers/user.controller');
+const instrCtrl = require('../controllers/instructor.controller');
+const payphoneCtrl = require('../controllers/payphone.controller');
+
+// ============================================================
+// AUTH
+// ============================================================
+router.post('/auth/login', authCtrl.login);
+router.get('/auth/me', authenticate, loadGym, authCtrl.getMe);
+router.post('/auth/change-password', authenticate, authCtrl.changePassword);
+
+// ============================================================
+// SUPER ADMIN
+// ============================================================
+router.get('/super/gyms', authenticate, requireSuperAdmin, superCtrl.getGyms);
+router.post('/super/gyms', authenticate, requireSuperAdmin, superCtrl.createGym);
+router.put('/super/gyms/:gymId', authenticate, requireSuperAdmin, superCtrl.updateGym);
+router.patch('/super/gyms/:gymId/toggle', authenticate, requireSuperAdmin, superCtrl.toggleGym);
+router.get('/super/gyms/:gymId/admins', authenticate, requireSuperAdmin, superCtrl.getGymAdmins);
+router.post('/super/gyms/:gymId/admins', authenticate, requireSuperAdmin, superCtrl.addGymAdmin);
+router.delete('/super/gyms/:gymId/admins/:userId', authenticate, requireSuperAdmin, superCtrl.removeGymAdmin);
+router.get('/super/gyms/:gymId/membership-plans', authenticate, requireSuperAdmin, superCtrl.getGymMembershipPlans);
+router.post('/super/gyms/:gymId/membership-plans', authenticate, requireSuperAdmin, superCtrl.createMembershipPlan);
+router.post('/super/gyms/:gymId/apply-theme', authenticate, requireSuperAdmin, superCtrl.applyTheme);
+router.get('/super/reports', authenticate, requireSuperAdmin, superCtrl.getGlobalReport);
+router.get('/super/themes', authenticate, requireSuperAdmin, superCtrl.getThemes);
+
+// ============================================================
+// ADMIN DEL GYM
+// ============================================================
+const adminAuth = [authenticate, loadGym, requireRole('admin', 'super_admin')];
+
+router.get('/admin/dashboard', ...adminAuth, adminCtrl.getDashboard);
+
+// Usuarios
+router.get('/admin/users', ...adminAuth, adminCtrl.getUsers);
+router.post('/admin/users', ...adminAuth, adminCtrl.createUser);
+router.get('/admin/users/:userId', ...adminAuth, adminCtrl.getUserDetail);
+router.put('/admin/users/:userId', ...adminAuth, adminCtrl.updateUser);
+router.post('/admin/users/:userId/reset-password', ...adminAuth, adminCtrl.resetUserPassword);
+router.post('/admin/users/:userId/activate-membership', ...adminAuth, adminCtrl.activateMembership);
+
+// Tipos de membresía
+router.get('/admin/membership-types', ...adminAuth, adminCtrl.getMembershipTypes);
+router.post('/admin/membership-types', ...adminAuth, adminCtrl.createMembershipType);
+router.put('/admin/membership-types/:typeId', ...adminAuth, adminCtrl.updateMembershipType);
+router.delete('/admin/membership-types/:typeId', ...adminAuth, adminCtrl.deleteMembershipType);
+
+// Sesiones
+router.get('/admin/sessions', ...adminAuth, adminCtrl.getSessions);
+router.post('/admin/sessions', ...adminAuth, adminCtrl.createSession);
+router.put('/admin/sessions/:sessionId', ...adminAuth, adminCtrl.updateSession);
+router.delete('/admin/sessions/:sessionId', ...adminAuth, adminCtrl.deleteSession);
+
+// Horarios
+router.get('/admin/schedules', ...adminAuth, adminCtrl.getSchedules);
+router.post('/admin/schedules', ...adminAuth, adminCtrl.createSchedule);
+router.delete('/admin/schedules/:scheduleId', ...adminAuth, adminCtrl.deleteSchedule);
+
+// Instructores
+router.get('/admin/instructors', ...adminAuth, adminCtrl.getInstructors);
+router.post('/admin/instructors', ...adminAuth, adminCtrl.createInstructor);
+router.put('/admin/instructors/:instructorId', ...adminAuth, adminCtrl.updateInstructor);
+router.delete('/admin/instructors/:instructorId', ...adminAuth, adminCtrl.deleteInstructor);
+
+// Recepcionistas
+router.get('/admin/receptionists', ...adminAuth, adminCtrl.getReceptionists);
+router.post('/admin/receptionists', ...adminAuth, adminCtrl.createReceptionist);
+
+// Pagos
+router.get('/admin/payments', ...adminAuth, adminCtrl.getPayments);
+
+// Reportes
+router.get('/admin/reports', ...adminAuth, adminCtrl.getReports);
+router.get('/admin/attendance', ...adminAuth, adminCtrl.getAttendanceHistory);
+router.get('/admin/reception-audit', ...adminAuth, adminCtrl.getReceptionAudit);
+
+// Validar ingreso
+router.post('/admin/validate-entry', ...adminAuth, adminCtrl.validateEntry);
+
+// ============================================================
+// RECEPCIÓN
+// ============================================================
+const recepAuth = [authenticate, loadGym, requireRole('recepcionista', 'admin', 'super_admin')];
+
+router.get('/recepcion/dashboard', ...recepAuth, receptionCtrl.getDashboard);
+router.get('/recepcion/clients', ...recepAuth, receptionCtrl.getClients);
+router.post('/recepcion/clients', ...recepAuth, receptionCtrl.createClient);
+router.get('/recepcion/clients/:userId', ...recepAuth, receptionCtrl.getClientDetail);
+router.post('/recepcion/clients/:userId/membership', ...recepAuth, receptionCtrl.createMembership);
+router.post('/recepcion/clients/:userId/payment', ...recepAuth, receptionCtrl.registerPayment);
+router.get('/recepcion/memberships', ...recepAuth, receptionCtrl.getMemberships);
+router.get('/recepcion/payments', ...recepAuth, receptionCtrl.getPayments);
+router.get('/recepcion/schedules', ...recepAuth, receptionCtrl.getSchedules);
+router.post('/recepcion/schedules/:classInstanceId/book', ...recepAuth, receptionCtrl.bookClient);
+router.get('/recepcion/schedules/:classInstanceId/enrolled', ...recepAuth, receptionCtrl.getEnrolled);
+router.post('/recepcion/scanner/validate', ...recepAuth, receptionCtrl.validateEntry);
+router.get('/recepcion/attendance', ...recepAuth, receptionCtrl.getAttendance);
+
+// ============================================================
+// USUARIO / CLIENTE
+// ============================================================
+const userAuth = [authenticate, loadGym, requireRole('user', 'admin', 'super_admin')];
+
+router.get('/usuario/home', ...userAuth, userCtrl.getHome);
+router.get('/usuario/schedule', ...userAuth, userCtrl.getSchedule);
+router.post('/usuario/schedule/:classInstanceId/book', ...userAuth, userCtrl.bookClass);
+router.delete('/usuario/bookings/:bookingId', ...userAuth, userCtrl.cancelBooking);
+router.get('/usuario/bookings', ...userAuth, userCtrl.getMyBookings);
+router.get('/usuario/qr', ...userAuth, userCtrl.getMyQR);
+router.get('/usuario/profile', ...userAuth, userCtrl.getProfile);
+router.put('/usuario/profile', ...userAuth, userCtrl.updateProfile);
+router.get('/usuario/payment-history', ...userAuth, userCtrl.getPaymentHistory);
+router.get('/usuario/notifications', ...userAuth, userCtrl.getNotifications);
+router.get('/usuario/membership-plans', ...userAuth, userCtrl.getMembershipPlans);
+router.get('/usuario/wod', ...userAuth, userCtrl.getTodayWod);
+
+// PayPhone — Cajita de Pagos (flujo correcto según documentación oficial)
+router.get('/usuario/payphone/init', ...userAuth, payphoneCtrl.initPayment);
+router.post('/usuario/payphone/confirm', ...userAuth, payphoneCtrl.confirmPayment);
+router.post('/usuario/payphone/consent', ...userAuth, payphoneCtrl.signConsent);
+router.get('/usuario/payphone/auto-charge', ...userAuth, payphoneCtrl.getAutoChargeStatus);
+router.delete('/usuario/payphone/auto-charge', ...userAuth, payphoneCtrl.cancelAutoCharge);
+router.get('/usuario/payment-result', payphoneCtrl.paymentResult); // sin auth — redirect de PayPhone
+
+// Configuración PayPhone del Admin
+router.post('/admin/settings/payphone', ...adminAuth, payphoneCtrl.saveGymPayphoneCredentials);
+
+// ============================================================
+// INSTRUCTOR
+// ============================================================
+const instrAuth = [authenticate, loadGym, requireRole('instructor', 'admin', 'super_admin')];
+
+router.get('/instructor/today-classes', ...instrAuth, instrCtrl.getTodayClasses);
+router.get('/instructor/attendance', ...instrAuth, instrCtrl.getAttendanceByDate);
+router.get('/instructor/routines', ...instrAuth, instrCtrl.getRoutines);
+router.post('/instructor/routines', ...instrAuth, instrCtrl.createRoutine);
+router.get('/instructor/profile', ...instrAuth, instrCtrl.getProfile);
+router.put('/instructor/profile', ...instrAuth, instrCtrl.updateProfile);
+
+// ============================================================
+// BACKUP — Super Admin
+// ============================================================
+router.get('/super/backup/download', authenticate, requireSuperAdmin, async (req, res) => {
+  try {
+    const { exec } = require('child_process');
+    const dbUrl = process.env.DATABASE_URL;
+    if (!dbUrl) return res.status(500).json({ error: 'DATABASE_URL no configurado' });
+
+    const filename = `gymvip_backup_${new Date().toISOString().split('T')[0]}.sql`;
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', 'application/sql');
+
+    const pg_dump = exec(`pg_dump "${dbUrl}" --no-password`);
+    pg_dump.stdout.pipe(res);
+    pg_dump.stderr.on('data', (d) => console.error('pg_dump error:', d));
+    pg_dump.on('error', () => res.status(500).json({ error: 'Error generando backup' }));
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno al generar backup' });
+  }
+});
+
+// ============================================================
+// PÚBLICO — info del gym por slug (para login pages)
+// ============================================================
+router.get('/gym/:slug/info', async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const result = await require('../config/database').query(
+      `SELECT slug, name, logo_url, email, phone, address,
+              primary_color, secondary_color, theme, payphone_enabled
+       FROM gyms WHERE slug=$1 AND is_active=TRUE`,
+      [slug]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Gimnasio no encontrado' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+module.exports = router;

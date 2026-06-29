@@ -1,0 +1,520 @@
+const bcrypt = require('bcryptjs');
+const db = require('../config/database');
+
+// GET /api/recepcion/dashboard
+const getDashboard = async (req, res) => {
+  try {
+    const gymId = req.gym.id;
+
+    const kpis = await db.query(`
+      SELECT
+        (SELECT COUNT(*) FROM user_gym_roles WHERE gym_id=$1 AND role='user' AND is_active=TRUE) as total_clients,
+        (SELECT COUNT(*) FROM attendance WHERE gym_id=$1 AND DATE(check_in_time)=CURRENT_DATE) as asistencias_hoy,
+        (SELECT COUNT(DISTINCT ci.id) FROM class_instances ci WHERE ci.gym_id=$1 AND ci.class_date=CURRENT_DATE AND ci.status='scheduled') as clases_hoy,
+        (SELECT COALESCE(SUM(amount),0) FROM payments WHERE gym_id=$1 AND status='pagado' AND DATE(created_at)=CURRENT_DATE) as pagos_dia
+    `, [gymId]);
+
+    // Clases de hoy
+    const todayClasses = await db.query(`
+      SELECT ci.id, ci.class_date, ci.start_time, ci.end_time, ci.max_capacity,
+             s.name as session_name, i.name as instructor_name,
+             COUNT(b.id) FILTER (WHERE b.status='confirmed') as booked_count
+      FROM class_instances ci
+      JOIN sessions s ON s.id = ci.session_id
+      LEFT JOIN instructors i ON i.id = ci.instructor_id
+      LEFT JOIN bookings b ON b.class_instance_id = ci.id
+      WHERE ci.gym_id = $1 AND ci.class_date = CURRENT_DATE AND ci.status = 'scheduled'
+      GROUP BY ci.id, s.name, i.name
+      ORDER BY ci.start_time ASC
+    `, [gymId]);
+
+    // Últimos ingresos hoy
+    const recentAttendance = await db.query(`
+      SELECT u.name, u.cedula, a.check_in_time, a.method
+      FROM attendance a JOIN users u ON u.id = a.user_id
+      WHERE a.gym_id = $1 AND DATE(a.check_in_time) = CURRENT_DATE
+      ORDER BY a.check_in_time DESC LIMIT 10
+    `, [gymId]);
+
+    res.json({
+      kpis: kpis.rows[0],
+      todayClasses: todayClasses.rows,
+      recentAttendance: recentAttendance.rows
+    });
+  } catch (err) {
+    console.error('Error recepcion getDashboard:', err);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// GET /api/recepcion/clients
+const getClients = async (req, res) => {
+  try {
+    const gymId = req.gym.id;
+    const { search } = req.query;
+    const params = [gymId];
+    let searchCondition = '';
+
+    if (search) {
+      params.push(`%${search}%`);
+      searchCondition = `AND (u.name ILIKE $${params.length} OR u.cedula ILIKE $${params.length})`;
+    }
+
+    const result = await db.query(`
+      SELECT u.id, u.name, u.cedula, u.phone,
+        CASE 
+          WHEN m.id IS NOT NULL THEN mt.name
+          ELSE NULL
+        END as membership_name,
+        CASE 
+          WHEN m.id IS NOT NULL AND m.end_date >= CURRENT_DATE THEN 'active'
+          ELSE 'inactive'
+        END as membership_status,
+        m.end_date
+      FROM user_gym_roles ugr
+      JOIN users u ON u.id = ugr.user_id
+      LEFT JOIN LATERAL (
+        SELECT m2.id, m2.end_date, m2.membership_type_id
+        FROM memberships m2
+        WHERE m2.user_id = u.id AND m2.gym_id = $1
+          AND m2.status = 'active' AND m2.end_date >= CURRENT_DATE
+        ORDER BY m2.end_date DESC LIMIT 1
+      ) m ON TRUE
+      LEFT JOIN membership_types mt ON mt.id = m.membership_type_id
+      WHERE ugr.gym_id = $1 AND ugr.role = 'user' AND ugr.is_active = TRUE
+      ${searchCondition}
+      ORDER BY u.name ASC
+    `, params);
+
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// GET /api/recepcion/clients/:userId
+const getClientDetail = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const gymId = req.gym.id;
+
+    const userResult = await db.query(`
+      SELECT u.id, u.cedula, u.name, u.email, u.phone, u.qr_code
+      FROM users u
+      JOIN user_gym_roles ugr ON ugr.user_id = u.id AND ugr.gym_id = $2 AND ugr.role = 'user'
+      WHERE u.id = $1
+    `, [userId, gymId]);
+
+    if (!userResult.rows.length) return res.status(404).json({ error: 'Cliente no encontrado' });
+
+    // Membresía activa
+    const membership = await db.query(`
+      SELECT m.id, m.start_date, m.end_date, m.status, mt.name as type_name,
+             (m.end_date - CURRENT_DATE) as days_remaining
+      FROM memberships m JOIN membership_types mt ON mt.id = m.membership_type_id
+      WHERE m.user_id = $1 AND m.gym_id = $2
+        AND m.status = 'active' AND m.end_date >= CURRENT_DATE
+      ORDER BY m.end_date DESC LIMIT 1
+    `, [userId, gymId]);
+
+    // Pagos recientes
+    const payments = await db.query(`
+      SELECT p.id, p.amount, p.method, p.status, p.created_at, mt.name as membership_name
+      FROM payments p LEFT JOIN membership_types mt ON mt.id = p.membership_type_id
+      WHERE p.user_id = $1 AND p.gym_id = $2
+      ORDER BY p.created_at DESC LIMIT 10
+    `, [userId, gymId]);
+
+    res.json({
+      client: userResult.rows[0],
+      membership: membership.rows[0] || null,
+      payments: payments.rows
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// POST /api/recepcion/clients — crear nuevo cliente
+const createClient = async (req, res) => {
+  try {
+    const gymId = req.gym.id;
+    const { cedula, name, email, phone, password } = req.body;
+
+    if (!cedula || !name || !password) {
+      return res.status(400).json({ error: 'Cédula, nombre y contraseña son requeridos' });
+    }
+
+    // Verificar si ya existe en este gym
+    const existsInGym = await db.query(`
+      SELECT u.id FROM users u
+      JOIN user_gym_roles ugr ON ugr.user_id = u.id
+      WHERE u.cedula = $1 AND ugr.gym_id = $2 AND ugr.is_active = TRUE
+    `, [cedula, gymId]);
+
+    if (existsInGym.rows.length) {
+      return res.status(400).json({ error: 'Ya existe un cliente con esa cédula en este gimnasio' });
+    }
+
+    const hash = await bcrypt.hash(password, 10);
+    const newUser = await db.query(
+      'INSERT INTO users (cedula, name, email, phone, password_hash) VALUES ($1,$2,$3,$4,$5) RETURNING id',
+      [cedula, name, email, phone, hash]
+    );
+    const userId = newUser.rows[0].id;
+
+    await db.query(
+      "INSERT INTO user_gym_roles (user_id, gym_id, role) VALUES ($1,$2,'user')",
+      [userId, gymId]
+    );
+
+    // Auditoría
+    await db.query(
+      "INSERT INTO receptionists_audit (gym_id, receptionist_id, action, target_user_id) VALUES ($1,$2,'Cliente creado',$3)",
+      [gymId, req.user.id, userId]
+    );
+
+    res.status(201).json({ message: 'Cliente creado exitosamente', userId });
+  } catch (err) {
+    console.error('Error createClient:', err);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// POST /api/recepcion/clients/:userId/membership — nueva membresía
+const createMembership = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const gymId = req.gym.id;
+    const { membershipTypeId, method } = req.body;
+
+    const typeResult = await db.query(
+      'SELECT * FROM membership_types WHERE id = $1 AND gym_id = $2 AND is_active = TRUE',
+      [membershipTypeId, gymId]
+    );
+    if (!typeResult.rows.length) return res.status(404).json({ error: 'Plan no encontrado' });
+    const mType = typeResult.rows[0];
+
+    const startDate = new Date();
+    const endDate = new Date();
+    if (mType.duration_unit === 'days') endDate.setDate(endDate.getDate() + mType.duration_value);
+    else if (mType.duration_unit === 'weeks') endDate.setDate(endDate.getDate() + mType.duration_value * 7);
+    else if (mType.duration_unit === 'months') endDate.setMonth(endDate.getMonth() + mType.duration_value);
+    else if (mType.duration_unit === 'years') endDate.setFullYear(endDate.getFullYear() + mType.duration_value);
+
+    const memResult = await db.query(`
+      INSERT INTO memberships (user_id, gym_id, membership_type_id, start_date, end_date, status)
+      VALUES ($1,$2,$3,$4,$5,'active') RETURNING id
+    `, [userId, gymId, membershipTypeId,
+        startDate.toISOString().split('T')[0],
+        endDate.toISOString().split('T')[0]]);
+
+    await db.query(`
+      INSERT INTO payments (gym_id, user_id, membership_id, membership_type_id, amount, method, status, registered_by)
+      VALUES ($1,$2,$3,$4,$5,$6,'pagado',$7)
+    `, [gymId, userId, memResult.rows[0].id, membershipTypeId, mType.price, method || 'efectivo', req.user.id]);
+
+    // Auditoría
+    await db.query(
+      "INSERT INTO receptionists_audit (gym_id, receptionist_id, action, target_user_id) VALUES ($1,$2,'Membresía creada',$3)",
+      [gymId, req.user.id, userId]
+    );
+
+    res.status(201).json({ message: 'Membresía creada exitosamente' });
+  } catch (err) {
+    console.error('Error createMembership recepcion:', err);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// POST /api/recepcion/clients/:userId/payment — registrar pago manual
+const registerPayment = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const gymId = req.gym.id;
+    const { membershipTypeId, amount, method, notes } = req.body;
+
+    await db.query(`
+      INSERT INTO payments (gym_id, user_id, membership_type_id, amount, method, status, registered_by, notes)
+      VALUES ($1,$2,$3,$4,$5,'pagado',$6,$7)
+    `, [gymId, userId, membershipTypeId, amount, method || 'efectivo', req.user.id, notes]);
+
+    await db.query(
+      "INSERT INTO receptionists_audit (gym_id, receptionist_id, action, target_user_id) VALUES ($1,$2,'Pago registrado',$3)",
+      [gymId, req.user.id, userId]
+    );
+
+    res.status(201).json({ message: 'Pago registrado exitosamente' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// GET /api/recepcion/memberships
+const getMemberships = async (req, res) => {
+  try {
+    const gymId = req.gym.id;
+    const { filter = 'all' } = req.query;
+    let condition = '';
+    if (filter === 'active') condition = "AND m.status='active' AND m.end_date>=CURRENT_DATE";
+    else if (filter === 'expired') condition = "AND (m.status='expired' OR m.end_date<CURRENT_DATE)";
+
+    const result = await db.query(`
+      SELECT m.id, m.start_date, m.end_date, m.status, mt.name as type_name,
+             u.name as client_name, u.cedula as client_cedula
+      FROM memberships m
+      JOIN membership_types mt ON mt.id = m.membership_type_id
+      JOIN users u ON u.id = m.user_id
+      WHERE m.gym_id = $1 ${condition}
+      ORDER BY m.end_date DESC
+    `, [gymId]);
+
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// GET /api/recepcion/payments
+const getPayments = async (req, res) => {
+  try {
+    const gymId = req.gym.id;
+    const { date, method, status, period = 'day' } = req.query;
+    const params = [gymId];
+    let dateCondition = '';
+
+    if (period === 'day' && date) {
+      params.push(date);
+      dateCondition = `AND DATE(p.created_at) = $${params.length}`;
+    } else if (period === 'month') {
+      dateCondition = "AND DATE_TRUNC('month', p.created_at) = DATE_TRUNC('month', CURRENT_DATE)";
+    } else if (period === 'year') {
+      dateCondition = "AND DATE_TRUNC('year', p.created_at) = DATE_TRUNC('year', CURRENT_DATE)";
+    }
+
+    let methodCondition = '';
+    if (method && method !== 'todos') {
+      params.push(method);
+      methodCondition = `AND p.method = $${params.length}`;
+    }
+
+    let statusCondition = '';
+    if (status && status !== 'todos') {
+      params.push(status);
+      statusCondition = `AND p.status = $${params.length}`;
+    }
+
+    const result = await db.query(`
+      SELECT p.id, p.amount, p.method, p.status, p.created_at, p.notes,
+             u.name as client_name, u.cedula as client_cedula,
+             mt.name as membership_name
+      FROM payments p
+      JOIN users u ON u.id = p.user_id
+      LEFT JOIN membership_types mt ON mt.id = p.membership_type_id
+      WHERE p.gym_id = $1 ${dateCondition} ${methodCondition} ${statusCondition}
+      ORDER BY p.created_at DESC
+    `, params);
+
+    const totals = await db.query(`
+      SELECT COALESCE(SUM(amount) FILTER (WHERE status='pagado'),0) as total_dia,
+             COALESCE(AVG(amount) FILTER (WHERE status='pagado'),0) as promedio
+      FROM payments WHERE gym_id=$1 AND DATE(created_at) = CURRENT_DATE
+    `, [gymId]);
+
+    res.json({ payments: result.rows, totals: totals.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// GET /api/recepcion/schedules?date=
+const getSchedules = async (req, res) => {
+  try {
+    const gymId = req.gym.id;
+    const { date = new Date().toISOString().split('T')[0] } = req.query;
+
+    // Generar instancias si no existen
+    await db.query('SELECT generate_class_instances_for_date($1, $2)', [gymId, date]);
+
+    const result = await db.query(`
+      SELECT ci.id, ci.class_date, ci.start_time, ci.end_time, ci.max_capacity, ci.status,
+             s.name as session_name, s.duration_minutes,
+             i.name as instructor_name,
+             COUNT(b.id) FILTER (WHERE b.status='confirmed') as booked_count
+      FROM class_instances ci
+      JOIN sessions s ON s.id = ci.session_id
+      LEFT JOIN instructors i ON i.id = ci.instructor_id
+      LEFT JOIN bookings b ON b.class_instance_id = ci.id
+      WHERE ci.gym_id = $1 AND ci.class_date = $2
+      GROUP BY ci.id, s.name, s.duration_minutes, i.name
+      ORDER BY ci.start_time ASC
+    `, [gymId, date]);
+
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// POST /api/recepcion/schedules/:classInstanceId/book — inscribir cliente
+const bookClient = async (req, res) => {
+  try {
+    const { classInstanceId } = req.params;
+    const gymId = req.gym.id;
+    const { userId } = req.body;
+
+    // Verificar capacidad
+    const classResult = await db.query(`
+      SELECT ci.max_capacity, COUNT(b.id) FILTER (WHERE b.status='confirmed') as booked
+      FROM class_instances ci
+      LEFT JOIN bookings b ON b.class_instance_id = ci.id
+      WHERE ci.id = $1 AND ci.gym_id = $2
+      GROUP BY ci.id
+    `, [classInstanceId, gymId]);
+
+    if (!classResult.rows.length) return res.status(404).json({ error: 'Clase no encontrada' });
+    const cls = classResult.rows[0];
+
+    if (parseInt(cls.booked) >= cls.max_capacity) {
+      return res.status(400).json({ error: 'La clase está llena' });
+    }
+
+    // Verificar membresía activa
+    const memResult = await db.query(`
+      SELECT id FROM memberships
+      WHERE user_id=$1 AND gym_id=$2 AND status='active' AND end_date>=CURRENT_DATE
+      LIMIT 1
+    `, [userId, gymId]);
+
+    if (!memResult.rows.length) {
+      return res.status(400).json({ error: 'El cliente no tiene membresía activa' });
+    }
+
+    // Crear reserva
+    await db.query(`
+      INSERT INTO bookings (gym_id, user_id, class_instance_id, status, booked_by, booked_by_role)
+      VALUES ($1,$2,$3,'confirmed',$4,'recepcionista')
+      ON CONFLICT (user_id, class_instance_id) DO UPDATE SET status='confirmed'
+    `, [gymId, userId, classInstanceId, req.user.id]);
+
+    // Auditoría
+    await db.query(`
+      INSERT INTO receptionists_audit (gym_id, receptionist_id, action, target_user_id, class_instance_id)
+      VALUES ($1,$2,'Reserva creada',$3,$4)
+    `, [gymId, req.user.id, userId, classInstanceId]);
+
+    res.status(201).json({ message: 'Cliente inscrito exitosamente' });
+  } catch (err) {
+    console.error('Error bookClient:', err);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// GET /api/recepcion/schedules/:classInstanceId/enrolled
+const getEnrolled = async (req, res) => {
+  try {
+    const { classInstanceId } = req.params;
+    const result = await db.query(`
+      SELECT u.id, u.name, u.cedula, b.status, b.created_at
+      FROM bookings b JOIN users u ON u.id = b.user_id
+      WHERE b.class_instance_id = $1 AND b.gym_id = $2
+      ORDER BY u.name
+    `, [classInstanceId, req.gym.id]);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// GET /api/recepcion/scanner/validate
+const validateEntry = async (req, res) => {
+  try {
+    const gymId = req.gym.id;
+    const { code } = req.body;
+
+    const userResult = await db.query(`
+      SELECT u.id, u.name, u.cedula
+      FROM users u
+      JOIN user_gym_roles ugr ON ugr.user_id = u.id AND ugr.gym_id = $1 AND ugr.is_active = TRUE
+      WHERE (u.qr_code = $2 OR u.cedula = $2)
+    `, [gymId, code]);
+
+    if (!userResult.rows.length) {
+      return res.json({ valid: false, error: 'Usuario no encontrado en este gimnasio' });
+    }
+
+    const user = userResult.rows[0];
+
+    const memResult = await db.query(`
+      SELECT m.id, mt.name as type_name, m.end_date
+      FROM memberships m JOIN membership_types mt ON mt.id = m.membership_type_id
+      WHERE m.user_id=$1 AND m.gym_id=$2 AND m.status='active' AND m.end_date>=CURRENT_DATE
+      ORDER BY m.end_date DESC LIMIT 1
+    `, [user.id, gymId]);
+
+    if (!memResult.rows.length) {
+      return res.json({
+        valid: false,
+        user: { name: user.name, cedula: user.cedula },
+        error: 'Sin membresía activa'
+      });
+    }
+
+    const membership = memResult.rows[0];
+
+    await db.query(`
+      INSERT INTO attendance (gym_id, user_id, membership_id, method, validated_by)
+      VALUES ($1,$2,$3,'qr',$4)
+    `, [gymId, user.id, membership.id, req.user.id]);
+
+    res.json({
+      valid: true,
+      user: { name: user.name, cedula: user.cedula },
+      membership: { typeName: membership.type_name, endDate: membership.end_date }
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// GET /api/recepcion/attendance
+const getAttendance = async (req, res) => {
+  try {
+    const gymId = req.gym.id;
+    const { dateFrom, dateTo } = req.query;
+    const params = [gymId];
+    let dateCondition = '';
+
+    if (dateFrom) { params.push(dateFrom); dateCondition += ` AND DATE(a.check_in_time) >= $${params.length}`; }
+    if (dateTo) { params.push(dateTo); dateCondition += ` AND DATE(a.check_in_time) <= $${params.length}`; }
+
+    const kpis = await db.query(`
+      SELECT COUNT(*) as total, COUNT(DISTINCT user_id) as unique_users,
+             COUNT(DISTINCT membership_id) as with_membership
+      FROM attendance WHERE gym_id=$1 ${dateCondition}
+    `, params);
+
+    const byDay = await db.query(`
+      SELECT DATE(check_in_time) as date, COUNT(*) as count
+      FROM attendance WHERE gym_id=$1 ${dateCondition}
+      GROUP BY DATE(check_in_time) ORDER BY date
+    `, params);
+
+    const heatmap = await db.query(`
+      SELECT EXTRACT(DOW FROM check_in_time)::int as dow,
+             EXTRACT(HOUR FROM check_in_time)::int as hour, COUNT(*) as count
+      FROM attendance WHERE gym_id=$1 ${dateCondition}
+      GROUP BY dow, hour
+    `, params);
+
+    res.json({ kpis: kpis.rows[0], byDay: byDay.rows, heatmap: heatmap.rows });
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+module.exports = {
+  getDashboard, getClients, getClientDetail, createClient,
+  createMembership, registerPayment, getMemberships, getPayments,
+  getSchedules, bookClient, getEnrolled, validateEntry, getAttendance
+};
