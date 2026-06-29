@@ -58,6 +58,7 @@ const getHome = async (req, res) => {
   }
 };
 
+console.log('getSchedule llamado - gymId:', gymId, 'date:', date, 'userId:', userId);
 // GET /api/usuario/schedule?date=
 const getSchedule = async (req, res) => {
   try {
@@ -65,12 +66,12 @@ const getSchedule = async (req, res) => {
     const userId = req.user.id;
     const { date = new Date().toISOString().split('T')[0] } = req.query;
 
-    // Generar instancias si no existen
+    // Generar instancias
     try {
-  await db.query('SELECT generate_class_instances_for_date($1::uuid, $2::date)', [gymId, date]);
-} catch (genErr) {
-  console.error('Error generando instancias:', genErr.message);
-}
+      await db.query('SELECT generate_class_instances_for_date($1::uuid, $2::date)', [gymId, date]);
+    } catch (genErr) {
+      console.error('Error generando instancias:', genErr.message);
+    }
 
     // Verificar membresía activa
     const hasMembership = await db.query(`
