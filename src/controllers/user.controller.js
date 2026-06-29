@@ -112,7 +112,8 @@ const classes = await db.query(`
   LEFT JOIN instructors i ON i.id = ci.instructor_id
   LEFT JOIN bookings b ON b.class_instance_id = ci.id AND b.user_id = $3
   LEFT JOIN bookings b2 ON b2.class_instance_id = ci.id
-  WHERE ci.gym_id=$1 AND ci.class_date=$2 AND ci.status='scheduled'
+ WHERE ci.gym_id=$1 AND ci.class_date=$2 AND ci.status='scheduled'
+AND (ci.class_date > CURRENT_DATE OR ci.end_time > CURRENT_TIME)
   GROUP BY ci.id, s.name, s.duration_minutes, s.difficulty, i.name
   ORDER BY ci.start_time ASC
 `, [gymId, date, userId]);
