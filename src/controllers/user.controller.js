@@ -87,13 +87,15 @@ console.log('Obteniendo config del gym...');
 const gymConfig = await db.query(
   'SELECT booking_advance_days FROM gyms WHERE id=$1', [gymId]
 );
-console.log('Config gym OK');
-    const advanceDays = gymConfig.rows[0]?.booking_advance_days || 7;
+console.log('Config gym OK, advanceDays:', gymConfig.rows[0]?.booking_advance_days);
 
-    // Solo mostrar fechas disponibles (hoy + advanceDays)
-    const maxDate = new Date();
-    maxDate.setDate(maxDate.getDate() + advanceDays);
-    const requestDate = new Date(date);
+const advanceDays = gymConfig.rows[0]?.booking_advance_days || 7;
+const maxDate = new Date();
+maxDate.setDate(maxDate.getDate() + advanceDays);
+const requestDate = new Date(date);
+console.log('maxDate:', maxDate, 'requestDate:', requestDate, 'valido:', requestDate <= maxDate);
+
+console.log('Consultando clases...');
 
     if (requestDate > maxDate) {
       return res.json({ classes: [], message: `Solo puedes ver hasta ${advanceDays} días de anticipación` });
