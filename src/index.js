@@ -9,6 +9,7 @@ const db = require('./config/database');
 const routes = require('./routes/index');
 
 const app = express();
+app.set('trust proxy', 1); 
 const PORT = process.env.PORT || 3001;
 
 // ============================================================

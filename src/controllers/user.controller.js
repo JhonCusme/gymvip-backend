@@ -101,27 +101,28 @@ console.log('Consultando clases...');
       return res.json({ classes: [], message: `Solo puedes ver hasta ${advanceDays} días de anticipación` });
     }
 
-    const classes = await db.query(`
-      SELECT ci.id, ci.class_date, ci.start_time, ci.end_time, ci.max_capacity,
-             s.name as session_name, s.duration_minutes, s.difficulty,
-             i.name as instructor_name,
-             COUNT(b2.id) FILTER (WHERE b2.status='confirmed') as booked_count,
-             MAX(CASE WHEN b.user_id=$3 AND b.status='confirmed' THEN true ELSE false END) as is_booked
-      FROM class_instances ci
-      JOIN sessions s ON s.id = ci.session_id
-      LEFT JOIN instructors i ON i.id = ci.instructor_id
-      LEFT JOIN bookings b ON b.class_instance_id = ci.id AND b.user_id = $3
-      LEFT JOIN bookings b2 ON b2.class_instance_id = ci.id
-      WHERE ci.gym_id=$1 AND ci.class_date=$2 AND ci.status='scheduled'
-      GROUP BY ci.id, s.name, s.duration_minutes, s.difficulty, i.name
-      ORDER BY ci.start_time ASC
-    `, [gymId, date, userId]);
+const classes = await db.query(`
+  SELECT ci.id, ci.class_date, ci.start_time, ci.end_time, ci.max_capacity,
+         s.name as session_name, s.duration_minutes, s.difficulty,
+         i.name as instructor_name,
+         COUNT(b2.id) FILTER (WHERE b2.status='confirmed') as booked_count,
+         BOOL_OR(CASE WHEN b.user_id=$3 AND b.status='confirmed' THEN true ELSE false END) as is_booked
+  FROM class_instances ci
+  JOIN sessions s ON s.id = ci.session_id
+  LEFT JOIN instructors i ON i.id = ci.instructor_id
+  LEFT JOIN bookings b ON b.class_instance_id = ci.id AND b.user_id = $3
+  LEFT JOIN bookings b2 ON b2.class_instance_id = ci.id
+  WHERE ci.gym_id=$1 AND ci.class_date=$2 AND ci.status='scheduled'
+  GROUP BY ci.id, s.name, s.duration_minutes, s.difficulty, i.name
+  ORDER BY ci.start_time ASC
+`, [gymId, date, userId]);
+console.log('Clases encontradas:', classes.rows.length);
 
-    res.json({
-      classes: classes.rows,
-      hasMembership: hasMembership.rows.length > 0,
-      advanceDays
-    });
+res.json({
+  classes: classes.rows,
+  hasMembership: hasMembership.rows.length > 0,
+  advanceDays
+});
   } catch (err) {
     res.status(500).json({ error: 'Error interno' });
   }
