@@ -66,7 +66,11 @@ const getSchedule = async (req, res) => {
     const { date = new Date().toISOString().split('T')[0] } = req.query;
 
     // Generar instancias si no existen
-    await db.query('SELECT generate_class_instances_for_date($1, $2)', [gymId, date]);
+    try {
+  await db.query('SELECT generate_class_instances_for_date($1::uuid, $2::date)', [gymId, date]);
+} catch (genErr) {
+  console.error('Error generando instancias:', genErr.message);
+}
 
     // Verificar membresía activa
     const hasMembership = await db.query(`
