@@ -65,24 +65,29 @@ const getSchedule = async (req, res) => {
     const gymId = req.gym.id;
     const userId = req.user.id;
     const { date = new Date().toISOString().split('T')[0] } = req.query;
-     console.log('getSchedule llamado - gymId:', gymId, 'date:', date, 'userId:', userId);
+    console.log('getSchedule llamado - gymId:', gymId, 'date:', date, 'userId:', userId);
 
-    // Generar instancias
-    try {
-      await db.query('SELECT generate_class_instances_for_date($1::uuid, $2::date)', [gymId, date]);
-    } catch (genErr) {
-      console.error('Error generando instancias:', genErr.message);
-    }
+// Generar instancias
+try {
+  await db.query('SELECT generate_class_instances_for_date($1::uuid, $2::date)', [gymId, date]);
+  console.log('Instancias generadas OK');
+} catch (genErr) {
+  console.error('Error generando instancias:', genErr.message);
+}
 
-    // Verificar membresía activa
-    const hasMembership = await db.query(`
-      SELECT id FROM memberships
-      WHERE user_id=$1 AND gym_id=$2 AND status='active' AND end_date>=CURRENT_DATE LIMIT 1
-    `, [userId, gymId]);
+// Verificar membresía
+console.log('Verificando membresía...');
+const hasMembership = await db.query(`
+  SELECT id FROM memberships
+  WHERE user_id=$1 AND gym_id=$2 AND status='active' AND end_date>=CURRENT_DATE LIMIT 1
+`, [userId, gymId]);
+console.log('Membresía encontrada:', hasMembership.rows.length);
 
-    const gymConfig = await db.query(
-      'SELECT booking_advance_days FROM gyms WHERE id=$1', [gymId]
-    );
+console.log('Obteniendo config del gym...');
+const gymConfig = await db.query(
+  'SELECT booking_advance_days FROM gyms WHERE id=$1', [gymId]
+);
+console.log('Config gym OK');
     const advanceDays = gymConfig.rows[0]?.booking_advance_days || 7;
 
     // Solo mostrar fechas disponibles (hoy + advanceDays)
