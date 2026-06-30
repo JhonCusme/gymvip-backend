@@ -557,9 +557,9 @@ const getReports = async (req, res) => {
     const gymId = req.gym.id;
     const { period = 'month' } = req.query;
 
-    let dateFilter = period === 'year'
-      ? "AND p.created_at >= DATE_TRUNC('year', NOW())"
-      : "AND p.created_at >= DATE_TRUNC('month', NOW())";
+ const dateFilter = period === 'year'
+  ? `AND created_at >= DATE_TRUNC('year', NOW())`
+  : `AND created_at >= DATE_TRUNC('month', NOW())`;
 
     const revenue = await db.query(`
       SELECT 
@@ -701,12 +701,19 @@ const getAttendanceHistory = async (req, res) => {
     if (dateTo) { params.push(dateTo); dateCondition += ` AND DATE(a.check_in_time) <= $${params.length}`; }
 
     const kpis = await db.query(`
-      SELECT COUNT(*) as total_ingresos,
-             COUNT(DISTINCT user_id) as usuarios_unicos,
-             COUNT(DISTINCT membership_id) as membresias_validas,
-             TO_CHAR(check_in_time, 'HH24:MI') as hora_pico
-      FROM attendance WHERE gym_id = $1 ${dateCondition}
-    `, params);
+  SELECT 
+    COUNT(*) as total_ingresos,
+    COUNT(DISTINCT user_id) as usuarios_unicos,
+    COUNT(DISTINCT membership_id) as membresias_validas,
+    TO_CHAR(
+      (SELECT check_in_time FROM attendance 
+       WHERE gym_id = $1 ${dateCondition}
+       GROUP BY EXTRACT(HOUR FROM check_in_time)
+       ORDER BY COUNT(*) DESC LIMIT 1),
+      'HH24:MI'
+    ) as hora_pico
+  FROM attendance a WHERE gym_id = $1 ${dateCondition}
+`, params);
 
     const byDay = await db.query(`
       SELECT DATE(check_in_time) as date, COUNT(*) as count

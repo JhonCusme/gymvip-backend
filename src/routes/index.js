@@ -24,6 +24,7 @@ router.get('/super/gyms', authenticate, requireSuperAdmin, superCtrl.getGyms);
 router.post('/super/gyms', authenticate, requireSuperAdmin, superCtrl.createGym);
 router.put('/super/gyms/:gymId', authenticate, requireSuperAdmin, superCtrl.updateGym);
 router.patch('/super/gyms/:gymId/toggle', authenticate, requireSuperAdmin, superCtrl.toggleGym);
+router.delete('/super/gyms/:gymId', authenticate, requireSuperAdmin, superCtrl.deleteGym);
 router.get('/super/gyms/:gymId/admins', authenticate, requireSuperAdmin, superCtrl.getGymAdmins);
 router.post('/super/gyms/:gymId/admins', authenticate, requireSuperAdmin, superCtrl.addGymAdmin);
 router.delete('/super/gyms/:gymId/admins/:userId', authenticate, requireSuperAdmin, superCtrl.removeGymAdmin);
@@ -133,6 +134,25 @@ router.get('/usuario/payment-result', payphoneCtrl.paymentResult); // sin auth �
 
 // Configuración PayPhone del Admin
 router.post('/admin/settings/payphone', ...adminAuth, payphoneCtrl.saveGymPayphoneCredentials);
+
+// GET membresías activas del gym
+router.get('/admin/memberships-list', ...adminAuth, async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT m.id, m.start_date, m.end_date, m.status, m.auto_renew,
+             mt.name as type_name, mt.price,
+             u.name as client_name, u.cedula as client_cedula
+      FROM memberships m
+      JOIN membership_types mt ON mt.id = m.membership_type_id
+      JOIN users u ON u.id = m.user_id
+      WHERE m.gym_id = $1
+      ORDER BY m.created_at DESC
+    `, [req.gym.id]);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
 
 // ============================================================
 // INSTRUCTOR

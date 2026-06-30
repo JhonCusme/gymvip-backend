@@ -304,8 +304,20 @@ const applyTheme = async (req, res) => {
   }
 };
 
+// DELETE gym — eliminar gym y todos sus datos
+const deleteGym = async (req, res) => {
+  try {
+    const { gymId } = req.params;
+    await db.query('DELETE FROM gyms WHERE id = $1', [gymId]);
+    res.json({ message: 'Gimnasio eliminado exitosamente' });
+  } catch (err) {
+    console.error('Error deleteGym:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
 module.exports = {
-  getGyms, createGym, updateGym, toggleGym,
+  getGyms, createGym, updateGym, toggleGym, deleteGym,
   getGymAdmins, addGymAdmin, removeGymAdmin,
   getGymMembershipPlans, createMembershipPlan,
   getGlobalReport, getThemes, applyTheme
