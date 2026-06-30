@@ -700,17 +700,18 @@ const getAttendanceHistory = async (req, res) => {
     if (dateFrom) { params.push(dateFrom); dateCondition += ` AND DATE(a.check_in_time) >= $${params.length}`; }
     if (dateTo) { params.push(dateTo); dateCondition += ` AND DATE(a.check_in_time) <= $${params.length}`; }
 
-    const kpis = await db.query(`
+   const kpis = await db.query(`
   SELECT 
     COUNT(*) as total_ingresos,
     COUNT(DISTINCT user_id) as usuarios_unicos,
     COUNT(DISTINCT membership_id) as membresias_validas,
-    TO_CHAR(
-      (SELECT check_in_time FROM attendance 
+    COALESCE(
+      (SELECT EXTRACT(HOUR FROM check_in_time)::text || ':00'
+       FROM attendance 
        WHERE gym_id = $1 ${dateCondition}
        GROUP BY EXTRACT(HOUR FROM check_in_time)
        ORDER BY COUNT(*) DESC LIMIT 1),
-      'HH24:MI'
+      '--:--'
     ) as hora_pico
   FROM attendance a WHERE gym_id = $1 ${dateCondition}
 `, params);
