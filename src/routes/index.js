@@ -53,6 +53,20 @@ router.get('/super/themes', authenticate, requireSuperAdmin, superCtrl.getThemes
 // ============================================================
 const adminAuth = [authenticate, loadGym, requireRole('admin', 'super_admin')];
 
+// Actualizar perfil del admin
+router.put('/admin/profile', ...adminAuth, async (req, res) => {
+  try {
+    const { name, email, phone } = req.body;
+    await require('../config/database').query(
+      'UPDATE users SET name=COALESCE($1,name), email=COALESCE($2,email), phone=COALESCE($3,phone), updated_at=NOW() WHERE id=$4',
+      [name, email, phone, req.user.id]
+    );
+    res.json({ message: 'Perfil actualizado' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
 router.get('/admin/dashboard', ...adminAuth, adminCtrl.getDashboard);
 
 // Usuarios
