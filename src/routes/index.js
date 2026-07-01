@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { authenticate, requireRole, requireSuperAdmin, loadGym } = require('../middleware/auth');
 const { uploadGymLogo, uploadInstructorPhoto } = require('../config/cloudinary');
+const db = require('../config/database');
 
 const authCtrl = require('../controllers/auth.controller');
 const superCtrl = require('../controllers/super.controller');
