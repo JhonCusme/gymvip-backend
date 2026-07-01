@@ -18,9 +18,22 @@ router.post('/auth/login', authCtrl.login);
 router.get('/auth/me', authenticate, loadGym, authCtrl.getMe);
 router.post('/auth/change-password', authenticate, authCtrl.changePassword);
 
+// Upload logo del gym
+router.post('/super/upload-logo', authenticate, requireSuperAdmin, uploadGymLogo.single('logo'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No se subió ninguna imagen' });
+  res.json({ url: req.file.path });
+});
+
+// Upload foto instructor
+router.post('/admin/upload-photo', authenticate, loadGym, requireRole('admin', 'super_admin'), uploadInstructorPhoto.single('photo'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No se subió ninguna imagen' });
+  res.json({ url: req.file.path });
+});
+
 // ============================================================
 // SUPER ADMIN
 // ============================================================
+
 router.get('/super/gyms', authenticate, requireSuperAdmin, superCtrl.getGyms);
 router.post('/super/gyms', authenticate, requireSuperAdmin, superCtrl.createGym);
 router.put('/super/gyms/:gymId', authenticate, requireSuperAdmin, superCtrl.updateGym);
