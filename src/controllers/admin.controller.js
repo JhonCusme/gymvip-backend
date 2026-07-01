@@ -700,7 +700,7 @@ const getAttendanceHistory = async (req, res) => {
     if (dateFrom) { params.push(dateFrom); dateCondition += ` AND DATE(a.check_in_time) >= $${params.length}`; }
     if (dateTo) { params.push(dateTo); dateCondition += ` AND DATE(a.check_in_time) <= $${params.length}`; }
 
-   const kpis = await db.query(`
+  const kpis = await db.query(`
   SELECT 
     COUNT(*) as total_ingresos,
     COUNT(DISTINCT user_id) as usuarios_unicos,
@@ -713,7 +713,8 @@ const getAttendanceHistory = async (req, res) => {
        ORDER BY COUNT(*) DESC LIMIT 1),
       '--:--'
     ) as hora_pico
-  FROM attendance a WHERE gym_id = $1 ${dateCondition}
+  FROM attendance
+  WHERE gym_id = $1 ${dateCondition}
 `, params);
 
     const byDay = await db.query(`
