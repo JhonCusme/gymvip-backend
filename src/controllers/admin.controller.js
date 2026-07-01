@@ -731,7 +731,8 @@ const getAttendanceHistory = async (req, res) => {
     `, params);
 
     res.json({ kpis: kpis.rows[0], byDay: byDay.rows, heatmap: heatmap.rows });
-  } catch (err) {
+  }  catch (err) {
+    console.error('Error getAttendanceHistory:', err.message, err.stack);
     res.status(500).json({ error: 'Error interno' });
   }
 };
