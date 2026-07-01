@@ -183,6 +183,83 @@ router.get('/admin/memberships-list', ...adminAuth, async (req, res) => {
 });
 
 // ============================================================
+// WODs
+// ============================================================
+router.get('/admin/wods', ...adminAuth, async (req, res) => {
+  try {
+    const { month, year } = req.query;
+    const result = await db.query(`
+      SELECT w.*, u.name as created_by_name
+      FROM wods w
+      LEFT JOIN users u ON u.id = w.created_by
+      WHERE w.gym_id = $1
+        AND EXTRACT(MONTH FROM w.wod_date) = $2
+        AND EXTRACT(YEAR FROM w.wod_date) = $3
+      ORDER BY w.wod_date ASC
+    `, [req.gym.id, month || new Date().getMonth() + 1, year || new Date().getFullYear()]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error getWods:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+router.get('/admin/wods/:date', ...adminAuth, async (req, res) => {
+  try {
+    const result = await db.query(
+      'SELECT * FROM wods WHERE gym_id = $1 AND wod_date = $2',
+      [req.gym.id, req.params.date]
+    );
+    res.json(result.rows[0] || null);
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+router.post('/admin/wods', ...adminAuth, async (req, res) => {
+  try {
+    const { date, title, description, warmup, workout, cooldown, notes, difficulty } = req.body;
+    if (!date) return res.status(400).json({ error: 'Fecha requerida' });
+    const result = await db.query(`
+      INSERT INTO wods (gym_id, wod_date, title, description, warmup, workout, cooldown, notes, difficulty, created_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      ON CONFLICT (gym_id, wod_date) DO UPDATE SET
+        title = EXCLUDED.title, description = EXCLUDED.description,
+        warmup = EXCLUDED.warmup, workout = EXCLUDED.workout,
+        cooldown = EXCLUDED.cooldown, notes = EXCLUDED.notes,
+        difficulty = EXCLUDED.difficulty, updated_at = NOW()
+      RETURNING *
+    `, [req.gym.id, date, title, description, warmup, workout, cooldown, notes, difficulty || 'rx', req.user.id]);
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error createWod:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+router.delete('/admin/wods/:date', ...adminAuth, async (req, res) => {
+  try {
+    await db.query('DELETE FROM wods WHERE gym_id = $1 AND wod_date = $2', [req.gym.id, req.params.date]);
+    res.json({ message: 'WOD eliminado' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+router.get('/usuario/wod', ...userAuth, async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const result = await db.query(
+      'SELECT * FROM wods WHERE gym_id = $1 AND wod_date = $2',
+      [req.gym.id, today]
+    );
+    res.json(result.rows[0] || null);
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// ============================================================
 // INSTRUCTOR
 // ============================================================
 const instrAuth = [authenticate, loadGym, requireRole('instructor', 'admin', 'super_admin')];
