@@ -695,27 +695,34 @@ const getAttendanceHistory = async (req, res) => {
     const gymId = req.gym.id;
     const { dateFrom, dateTo } = req.query;
 
-    const params = [gymId];
     let dateCondition = '';
-    if (dateFrom) { params.push(dateFrom); dateCondition += ` AND DATE(a.check_in_time) >= $${params.length}`; }
-    if (dateTo) { params.push(dateTo); dateCondition += ` AND DATE(a.check_in_time) <= $${params.length}`; }
+    const params = [gymId];
+    
+    if (dateFrom) { 
+      params.push(dateFrom); 
+      dateCondition += ` AND DATE(check_in_time) >= $${params.length}`; 
+    }
+    if (dateTo) { 
+      params.push(dateTo); 
+      dateCondition += ` AND DATE(check_in_time) <= $${params.length}`; 
+    }
 
-  const kpis = await db.query(`
-  SELECT 
-    COUNT(*) as total_ingresos,
-    COUNT(DISTINCT user_id) as usuarios_unicos,
-    COUNT(DISTINCT membership_id) as membresias_validas,
-    COALESCE(
-      (SELECT EXTRACT(HOUR FROM check_in_time)::text || ':00'
-       FROM attendance 
-       WHERE gym_id = $1 ${dateCondition}
-       GROUP BY EXTRACT(HOUR FROM check_in_time)
-       ORDER BY COUNT(*) DESC LIMIT 1),
-      '--:--'
-    ) as hora_pico
-  FROM attendance
-  WHERE gym_id = $1 ${dateCondition}
-`, params);
+    const kpis = await db.query(`
+      SELECT 
+        COUNT(*) as total_ingresos,
+        COUNT(DISTINCT user_id) as usuarios_unicos,
+        COUNT(DISTINCT membership_id) as membresias_validas,
+        COALESCE(
+          (SELECT EXTRACT(HOUR FROM check_in_time)::text || ':00'
+           FROM attendance 
+           WHERE gym_id = $1 ${dateCondition}
+           GROUP BY EXTRACT(HOUR FROM check_in_time)
+           ORDER BY COUNT(*) DESC LIMIT 1),
+          '--:--'
+        ) as hora_pico
+      FROM attendance
+      WHERE gym_id = $1 ${dateCondition}
+    `, params);
 
     const byDay = await db.query(`
       SELECT DATE(check_in_time) as date, COUNT(*) as count
@@ -732,8 +739,8 @@ const getAttendanceHistory = async (req, res) => {
     `, params);
 
     res.json({ kpis: kpis.rows[0], byDay: byDay.rows, heatmap: heatmap.rows });
-  }  catch (err) {
-    console.error('Error getAttendanceHistory:', err.message, err.stack);
+  } catch (err) {
+    console.error('Error getAttendanceHistory:', err.message);
     res.status(500).json({ error: 'Error interno' });
   }
 };
