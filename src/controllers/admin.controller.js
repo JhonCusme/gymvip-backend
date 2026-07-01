@@ -267,9 +267,9 @@ const activateMembership = async (req, res) => {
     if (!typeResult.rows.length) return res.status(404).json({ error: 'Plan no encontrado' });
     const mType = typeResult.rows[0];
 
-    // Calcular fechas
-    const startDate = new Date();
-    const endDate = new Date();
+  // Calcular fechas
+    const startDate = req.body.startDate ? new Date(req.body.startDate) : new Date();
+    const endDate = new Date(startDate);
     const unit = mType.duration_unit;
     const value = mType.duration_value;
 
