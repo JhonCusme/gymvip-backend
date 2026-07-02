@@ -63,9 +63,9 @@ const login = async (req, res) => {
 
     // 5. Buscar el gym
     const gymResult = await db.query(
-      'SELECT id, slug, name, logo_url, primary_color, secondary_color, theme FROM gyms WHERE slug = $1 AND is_active = TRUE',
-      [gym]
-    );
+  'SELECT id, slug, name, logo_url, primary_color, secondary_color, theme, payphone_enabled FROM gyms WHERE slug = $1 AND is_active = TRUE',
+  [gym]
+);
 
     if (!gymResult.rows.length) {
       return res.status(404).json({ error: 'Gimnasio no encontrado o inactivo' });
