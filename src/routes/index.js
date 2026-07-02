@@ -116,6 +116,40 @@ router.get('/admin/reception-audit', ...adminAuth, adminCtrl.getReceptionAudit);
 // Validar ingreso
 router.post('/admin/validate-entry', ...adminAuth, adminCtrl.validateEntry);
 
+// Asignar rol adicional a un usuario
+router.post('/admin/users/:userId/roles', ...adminAuth, async (req, res) => {
+  try {
+    const { role } = req.body;
+    const validRoles = ['admin', 'instructor', 'recepcionista', 'user'];
+    if (!validRoles.includes(role)) return res.status(400).json({ error: 'Rol inválido' });
+    
+    await db.query(`
+      INSERT INTO user_gym_roles (user_id, gym_id, role, is_active)
+      VALUES ($1, $2, $3, TRUE)
+      ON CONFLICT (user_id, gym_id, role) DO UPDATE SET is_active = TRUE
+    `, [req.params.userId, req.gym.id, role]);
+    
+    res.json({ message: 'Rol asignado exitosamente' });
+  } catch (err) {
+    console.error('Error asignando rol:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Quitar rol a un usuario
+router.delete('/admin/users/:userId/roles/:role', ...adminAuth, async (req, res) => {
+  try {
+    await db.query(`
+      UPDATE user_gym_roles SET is_active = FALSE
+      WHERE user_id = $1 AND gym_id = $2 AND role = $3
+    `, [req.params.userId, req.gym.id, req.params.role]);
+    
+    res.json({ message: 'Rol removido exitosamente' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
 // ============================================================
 // RECEPCIÓN
 // ============================================================
