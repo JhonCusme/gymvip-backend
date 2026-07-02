@@ -12,31 +12,30 @@ const initPayment = async (req, res) => {
   try {
     const gymId = req.gym.id;
     const userId = req.user.id;
+    const { membershipTypeId, infoOnly, recurring } = req.query;
 
     if (!membershipTypeId) {
       return res.status(400).json({ error: 'membershipTypeId requerido' });
     }
 
     // Si solo quiere info del plan (para mostrar opciones)
-  const { membershipTypeId, infoOnly } = req.query;
-  
-  if (infoOnly === 'true') {
-    const planResult = await db.query(
-      'SELECT * FROM membership_types WHERE id = $1 AND gym_id = $2 AND is_active = TRUE',
-      [membershipTypeId, gymId]
-    );
-    if (!planResult.rows.length) return res.status(404).json({ error: 'Plan no encontrado' });
-    const plan = planResult.rows[0];
-    return res.json({
-      plan: {
-        name: plan.name,
-        price: plan.price,
-        durationValue: plan.duration_value,
-        durationUnit: plan.duration_unit,
-        recurringDiscount: parseFloat(plan.recurring_discount || 0)
-      }
-    });
-  }
+    if (infoOnly === 'true') {
+      const planResult = await db.query(
+        'SELECT * FROM membership_types WHERE id = $1 AND gym_id = $2 AND is_active = TRUE',
+        [membershipTypeId, gymId]
+      );
+      if (!planResult.rows.length) return res.status(404).json({ error: 'Plan no encontrado' });
+      const plan = planResult.rows[0];
+      return res.json({
+        plan: {
+          name: plan.name,
+          price: plan.price,
+          durationValue: plan.duration_value,
+          durationUnit: plan.duration_unit,
+          recurringDiscount: parseFloat(plan.recurring_discount || 0)
+        }
+      });
+    }
 
     // Obtener credenciales PayPhone del gym
     const gymResult = await db.query(
