@@ -166,7 +166,7 @@ router.post('/admin/settings/payphone', ...adminAuth, payphoneCtrl.saveGymPaypho
 router.get('/admin/settings/payphone', ...adminAuth, async (req, res) => {
   try {
     const result = await db.query(
-      'SELECT payphone_store_id as "storeId", payphone_token as "token" FROM gyms WHERE id = $1',
+      'SELECT payphone_store_id as "storeId", payphone_token as "token", payphone_enabled as "enabled" FROM gyms WHERE id = $1',
       [req.gym.id]
     );
     res.json(result.rows[0] || {});
