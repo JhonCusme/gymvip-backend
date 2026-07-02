@@ -327,15 +327,15 @@ const cancelAutoCharge = async (req, res) => {
 const saveGymPayphoneCredentials = async (req, res) => {
   try {
     const gymId = req.gym.id;
-    const { storeId, token } = req.body;
+    const { storeId, token, codingPassword } = req.body;
 
     if (!storeId || !token) {
       return res.status(400).json({ error: 'StoreId y Token son requeridos' });
     }
 
     await db.query(
-      'UPDATE gyms SET payphone_store_id = $1, payphone_token = $2, updated_at = NOW() WHERE id = $3',
-      [storeId, token, gymId]
+      'UPDATE gyms SET payphone_store_id = $1, payphone_token = $2, payphone_coding_password = $3, updated_at = NOW() WHERE id = $4',
+      [storeId, token, codingPassword || null, gymId]
     );
 
     res.json({ message: 'Credenciales guardadas exitosamente' });
@@ -344,8 +344,132 @@ const saveGymPayphoneCredentials = async (req, res) => {
   }
 };
 
+// ============================================================
+// COBRO RECURRENTE — se ejecuta desde el cron job
+// ============================================================
+const processRecurringPayments = async () => {
+  const crypto = require('crypto');
+  
+  try {
+    // Buscar membresías que vencen hoy con cobro automático activo
+    const memberships = await db.query(`
+      SELECT 
+        m.id as membership_id, m.user_id, m.gym_id, m.membership_type_id,
+        mt.price, mt.name as type_name, mt.duration_value, mt.duration_unit,
+        u.payphone_token as card_token, u.email, u.phone, u.cedula, u.name as user_name,
+        u.payphone_consent_signed,
+        g.payphone_token as gym_token, g.payphone_store_id, g.payphone_coding_password
+      FROM memberships m
+      JOIN membership_types mt ON mt.id = m.membership_type_id
+      JOIN users u ON u.id = m.user_id
+      JOIN gyms g ON g.id = m.gym_id
+      WHERE m.auto_renew = TRUE
+        AND m.status = 'active'
+        AND m.end_date = CURRENT_DATE
+        AND u.payphone_token IS NOT NULL
+        AND u.payphone_consent_signed = TRUE
+        AND g.payphone_enabled = TRUE
+        AND g.payphone_token IS NOT NULL
+        AND g.payphone_coding_password IS NOT NULL
+    `);
+
+    console.log(`[CRON] Procesando ${memberships.rows.length} cobros recurrentes`);
+
+    for (const mem of memberships.rows) {
+      try {
+        // Encriptar nombre del titular con AES-256-CBC
+        const encryptCardHolder = (name, password) => {
+          const key = crypto.scryptSync(password, 'salt', 32);
+          const iv = crypto.randomBytes(16);
+          const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+          let encrypted = cipher.update(name, 'utf8', 'base64');
+          encrypted += cipher.final('base64');
+          return iv.toString('base64') + ':' + encrypted;
+        };
+
+        const clientTransactionId = `REC-${mem.user_id.substring(0,8)}-${Date.now()}`;
+        const amountCents = Math.round(parseFloat(mem.price) * 100);
+
+        // Cobrar con cardToken
+        const payphoneRes = await axios.post(
+          'https://pay.payphonetodoesposible.com/api/transaction/web',
+          {
+            amount: amountCents,
+            amountWithoutTax: amountCents,
+            currency: 'USD',
+            clientTransactionId,
+            storeId: mem.payphone_store_id,
+            reference: `Renovación ${mem.type_name}`,
+            cardToken: mem.card_token,
+            cardHolder: encryptCardHolder(mem.user_name, mem.payphone_coding_password),
+            email: mem.email,
+            phoneNumber: mem.phone ? `+593${mem.phone.replace(/^0/, '')}` : undefined,
+            documentId: mem.cedula,
+            identificationType: 1,
+          },
+          {
+            headers: {
+              'Authorization': `Bearer ${mem.gym_token}`,
+              'Content-Type': 'application/json'
+            },
+            timeout: 15000
+          }
+        );
+
+        const data = payphoneRes.data;
+
+        if (data.transactionStatus === 'Approved' && data.statusCode === 3) {
+          // Calcular nueva fecha de fin
+          const startDate = new Date();
+          const endDate = new Date();
+          if (mem.duration_unit === 'days') endDate.setDate(endDate.getDate() + mem.duration_value);
+          else if (mem.duration_unit === 'weeks') endDate.setDate(endDate.getDate() + mem.duration_value * 7);
+          else if (mem.duration_unit === 'months') endDate.setMonth(endDate.getMonth() + mem.duration_value);
+          else if (mem.duration_unit === 'years') endDate.setFullYear(endDate.getFullYear() + mem.duration_value);
+
+          // Crear nueva membresía
+          const newMem = await db.query(`
+            INSERT INTO memberships (user_id, gym_id, membership_type_id, start_date, end_date, status, auto_renew)
+            VALUES ($1, $2, $3, $4, $5, 'active', TRUE) RETURNING id
+          `, [mem.user_id, mem.gym_id, mem.membership_type_id,
+              startDate.toISOString().split('T')[0], endDate.toISOString().split('T')[0]]);
+
+          // Registrar pago
+          await db.query(`
+            INSERT INTO payments (gym_id, user_id, membership_id, membership_type_id, amount, method, status, payphone_transaction_id)
+            VALUES ($1, $2, $3, $4, $5, 'payphone', 'pagado', $6)
+          `, [mem.gym_id, mem.user_id, newMem.rows[0].id, mem.membership_type_id,
+              mem.price, data.transactionId?.toString()]);
+
+          // Notificación
+          await db.query(`
+            INSERT INTO notifications (user_id, gym_id, title, message, type)
+            VALUES ($1, $2, '✅ Membresía renovada', $3, 'payment')
+          `, [mem.user_id, mem.gym_id,
+              `Tu membresía "${mem.type_name}" se renovó automáticamente. Válida hasta ${endDate.toLocaleDateString('es-EC')}.`]);
+
+          console.log(`[CRON] ✅ Cobro exitoso para usuario ${mem.user_id}`);
+        } else {
+          // Cobro fallido — notificar al usuario
+          await db.query(`
+            INSERT INTO notifications (user_id, gym_id, title, message, type)
+            VALUES ($1, $2, '⚠️ Error en renovación automática', $3, 'payment')
+          `, [mem.user_id, mem.gym_id,
+              `No pudimos renovar tu membresía "${mem.type_name}" automáticamente. Por favor realiza el pago manualmente.`]);
+
+          console.log(`[CRON] ❌ Cobro fallido para usuario ${mem.user_id}: ${data.message}`);
+        }
+      } catch (err) {
+        console.error(`[CRON] Error procesando cobro para usuario ${mem.user_id}:`, err.message);
+      }
+    }
+  } catch (err) {
+    console.error('[CRON] Error en processRecurringPayments:', err.message);
+  }
+};
+
 module.exports = {
   initPayment, confirmPayment, paymentResult,
   signConsent, getAutoChargeStatus, cancelAutoCharge,
-  saveGymPayphoneCredentials
+  saveGymPayphoneCredentials, processRecurringPayments
 };

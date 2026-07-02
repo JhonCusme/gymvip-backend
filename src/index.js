@@ -128,6 +128,13 @@ cron.schedule('0 9 * * *', async () => {
   }
 });
 
+// Cobro recurrente PayPhone — todos los días a las 8am
+cron.schedule('0 8 * * *', async () => {
+  console.log('[CRON] Ejecutando cobros recurrentes PayPhone...');
+  const { processRecurringPayments } = require('./controllers/payphone.controller');
+  await processRecurringPayments();
+});
+
 // Expirar payment_intents pendientes cada 15 minutos
 cron.schedule('*/15 * * * *', async () => {
   try {
