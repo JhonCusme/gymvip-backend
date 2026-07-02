@@ -484,6 +484,7 @@ const payphoneRes = await axios.post(
         
 
         const data = payphoneRes.data;
+        console.log('[CRON] Respuesta PayPhone:', JSON.stringify(payphoneRes.data));
 
         if (data.transactionStatus === 'Approved' && data.statusCode === 3) {
           // Calcular nueva fecha de fin
