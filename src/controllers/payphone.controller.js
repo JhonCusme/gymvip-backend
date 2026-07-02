@@ -413,8 +413,6 @@ const processRecurringPayments = async () => {
 
     for (const mem of memberships.rows) {
       try {
-        console.log('[CRON] Enviando cardHolder:', mem.user_name);
-console.log('[CRON] codingPassword disponible:', !!mem.payphone_coding_password);
         // Encriptar nombre del titular con AES-256-CBC
         const encryptCardHolder = (name, password) => {
   const key = Buffer.alloc(32);
@@ -431,7 +429,6 @@ console.log('[CRON] codingPassword disponible:', !!mem.payphone_coding_password)
 
         // Cobrar con cardToken
        const encryptedHolder = encryptCardHolder(mem.user_name, mem.payphone_coding_password);
-console.log('[CRON] cardHolder encriptado:', encryptedHolder?.substring(0, 30));
 
 const payphoneRes = await axios.post(
   'https://pay.payphonetodoesposible.com/api/transaction/web',
@@ -484,7 +481,6 @@ const payphoneRes = await axios.post(
         
 
         const data = payphoneRes.data;
-        console.log('[CRON] Respuesta PayPhone:', JSON.stringify(payphoneRes.data));
 
         if ((data.transactionStatus === 'Approved' || data.status === 'Approved') && data.statusCode === 3) {
           // Calcular nueva fecha de fin
@@ -529,7 +525,7 @@ const payphoneRes = await axios.post(
         }
       } catch (err) {
         console.error(`[CRON] Error procesando cobro para usuario ${mem.user_id}:`, err.message);
-console.error(`[CRON] Detalle completo:`, JSON.stringify(err.response?.data, null, 2));      }
+console.error(`[CRON] Error PayPhone:`, err.response?.data?.message);     }
     }
   } catch (err) {
     console.error('[CRON] Error en processRecurringPayments:', err.message);
