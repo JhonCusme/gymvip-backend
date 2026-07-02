@@ -12,7 +12,6 @@ const initPayment = async (req, res) => {
   try {
     const gymId = req.gym.id;
     const userId = req.user.id;
-    const { membershipTypeId } = req.query;
 
     if (!membershipTypeId) {
       return res.status(400).json({ error: 'membershipTypeId requerido' });
