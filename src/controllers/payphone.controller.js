@@ -210,6 +210,9 @@ const userConsent = await db.query(
   [intent.user_id]
 );
 
+// Guardar cardToken si viene (para cobro automático futuro)
+   const cardToken = req.body.ctoken || payphoneData.cardToken || payphoneData.ctoken;
+
 const autoRenew = userConsent.rows[0]?.payphone_consent_signed && !!cardToken;
 
 const memResult = await db.query(`
@@ -232,8 +235,6 @@ const memResult = await db.query(`
       intent.amount, payphoneData.transactionId?.toString(), JSON.stringify(payphoneData)
     ]);
 
-    // Guardar cardToken si viene (para cobro automático futuro)
-   const cardToken = req.body.ctoken || payphoneData.cardToken || payphoneData.ctoken;
 if (cardToken) {
   await db.query(
     'UPDATE users SET payphone_token = $1, payphone_token_date = NOW() WHERE id = $2',
