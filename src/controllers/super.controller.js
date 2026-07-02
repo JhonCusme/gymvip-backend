@@ -150,6 +150,26 @@ const addGymAdmin = async (req, res) => {
       ON CONFLICT (user_id, gym_id, role) DO UPDATE SET is_active = TRUE
     `, [userId, gymId]);
 
+    // Asignar membresía indefinida automática al admin
+    const adminPlan = await db.query(
+      `SELECT id FROM membership_types WHERE gym_id = $1 AND name = 'Admin - Acceso Indefinido' LIMIT 1`,
+      [gymId]
+    );
+
+    if (adminPlan.rows.length) {
+      const startDate = new Date();
+      const endDate = new Date();
+      endDate.setFullYear(endDate.getFullYear() + 99);
+
+      await db.query(`
+        INSERT INTO memberships (user_id, gym_id, membership_type_id, start_date, end_date, status)
+        VALUES ($1, $2, $3, $4, $5, 'active')
+        ON CONFLICT DO NOTHING
+      `, [userId, gymId, adminPlan.rows[0].id,
+          startDate.toISOString().split('T')[0],
+          endDate.toISOString().split('T')[0]]);
+    }
+
     res.status(201).json({ message: 'Administrador agregado exitosamente' });
   } catch (err) {
     console.error('Error addGymAdmin:', err);
@@ -196,6 +216,20 @@ const createMembershipPlan = async (req, res) => {
       INSERT INTO membership_types (gym_id, name, description, duration_value, duration_unit, price, sessions_per_week, is_active)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *
     `, [gymId, name, description, durationValue || 1, durationUnit || 'months', price || 0, sessionsPerWeek, isActive !== false]);
+
+    const gymId = result.rows[0].id;
+
+    // Crear plan de membresía gratuita para admins automáticamente
+    await db.query(`
+      INSERT INTO membership_types (gym_id, name, description, duration_value, duration_unit, price, is_active, is_public)
+      VALUES ($1, 'Admin - Acceso Indefinido', 'Membresía gratuita para administradores', 99, 'years', 0, TRUE, FALSE)
+    `, [gymId]);
+
+    // Crear plan de beca para staff
+    await db.query(`
+      INSERT INTO membership_types (gym_id, name, description, duration_value, duration_unit, price, is_active, is_public)
+      VALUES ($1, 'Beca Staff', 'Membresía gratuita para instructores y recepcionistas', 1, 'years', 0, TRUE, FALSE)
+    `, [gymId]);
 
     res.status(201).json(result.rows[0]);
   } catch (err) {
