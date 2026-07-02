@@ -456,7 +456,7 @@ const payphoneRes = await axios.post(
                 state: 'Guayas',
                 locality: 'Guayaquil',
                 firstName: mem.user_name.split(' ')[0] || mem.user_name,
-                lastName: mem.user_name.split(' ')[1] || '',
+                lastName: mem.user_name.split(' ').slice(1).join(' ') || mem.user_name.split(' ')[0] || 'N/A',
                 phoneNumber: mem.phone ? `+593${mem.phone.replace(/^0/, '')}` : '+593000000000',
                 email: mem.email || '',
                 postalCode: '090101',
