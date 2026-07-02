@@ -486,7 +486,7 @@ const payphoneRes = await axios.post(
         const data = payphoneRes.data;
         console.log('[CRON] Respuesta PayPhone:', JSON.stringify(payphoneRes.data));
 
-        if (data.transactionStatus === 'Approved' && data.statusCode === 3) {
+        if ((data.transactionStatus === 'Approved' || data.status === 'Approved') && data.statusCode === 3) {
           // Calcular nueva fecha de fin
           const startDate = new Date();
           const endDate = new Date();
@@ -525,7 +525,7 @@ const payphoneRes = await axios.post(
           `, [mem.user_id, mem.gym_id,
               `No pudimos renovar tu membresía "${mem.type_name}" automáticamente. Por favor realiza el pago manualmente.`]);
 
-          console.log(`[CRON] ❌ Cobro fallido para usuario ${mem.user_id}: ${data.message}`);
+          console.log(`[CRON] ❌ Cobro fallido para usuario ${mem.user_id}: ${data.message || data.status}`);
         }
       } catch (err) {
         console.error(`[CRON] Error procesando cobro para usuario ${mem.user_id}:`, err.message);
