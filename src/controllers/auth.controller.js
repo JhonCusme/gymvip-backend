@@ -73,7 +73,7 @@ const login = async (req, res) => {
 
     const gymData = gymResult.rows[0];
 
-    // 6. Verificar que el usuario tiene un rol en este gym
+ // 6. Obtener todos los roles del usuario en este gym
     const roleResult = await db.query(
       `SELECT role FROM user_gym_roles 
        WHERE user_id = $1 AND gym_id = $2 AND is_active = TRUE
@@ -83,8 +83,7 @@ const login = async (req, res) => {
            WHEN 'recepcionista' THEN 2 
            WHEN 'instructor' THEN 3 
            WHEN 'user' THEN 4 
-         END
-       LIMIT 1`,
+         END`,
       [user.id, gymData.id]
     );
 
@@ -92,25 +91,53 @@ const login = async (req, res) => {
       return res.status(403).json({ error: 'No tienes acceso a este gimnasio' });
     }
 
-    const role = roleResult.rows[0].role;
+    const roles = roleResult.rows.map(r => r.role);
+    const primaryRole = roles[0]; // rol de mayor prioridad
 
-    // 7. Generar token
+    // 7. Si tiene múltiples roles, devolver lista para que el frontend muestre selección
+    if (roles.length > 1) {
+      return res.json({
+        multiRole: true,
+        roles,
+        user: {
+          id: user.id,
+          cedula: user.cedula,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          qrCode: user.qr_code
+        },
+        gym: {
+          id: gymData.id,
+          slug: gymData.slug,
+          name: gymData.name,
+          logoUrl: gymData.logo_url,
+          primaryColor: gymData.primary_color,
+          secondaryColor: gymData.secondary_color,
+          theme: gymData.theme,
+          payphoneEnabled: gymData.payphone_enabled || false
+        }
+      });
+    }
+
+    // 8. Un solo rol — flujo normal
+    const role = primaryRole;
     const token = jwt.sign(
       { userId: user.id, gymId: gymData.id, gymSlug: gymData.slug, role },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
     );
 
-    // 8. Determinar redirect según rol
     const redirectMap = {
       admin: '/dashboard',
-      recepcionista: '/recepcion/dashboard',
+      recepcionista: '/recepcion',
       instructor: '/instructor',
       user: '/usuario/home'
     };
 
     res.json({
       token,
+      role,
       user: {
         id: user.id,
         cedula: user.cedula,
