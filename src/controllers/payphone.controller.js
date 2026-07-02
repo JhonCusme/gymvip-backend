@@ -497,6 +497,7 @@ const processRecurringPayments = async () => {
         }
       } catch (err) {
         console.error(`[CRON] Error procesando cobro para usuario ${mem.user_id}:`, err.message);
+        console.error(`[CRON] Detalle:`, err.response?.data);
       }
     }
   } catch (err) {
