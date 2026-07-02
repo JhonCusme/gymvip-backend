@@ -413,6 +413,8 @@ const processRecurringPayments = async () => {
 
     for (const mem of memberships.rows) {
       try {
+        console.log('[CRON] Enviando cardHolder:', mem.user_name);
+console.log('[CRON] codingPassword disponible:', !!mem.payphone_coding_password);
         // Encriptar nombre del titular con AES-256-CBC
         const encryptCardHolder = (name, password) => {
           const key = crypto.scryptSync(password, 'salt', 32);
@@ -427,30 +429,34 @@ const processRecurringPayments = async () => {
         const amountCents = Math.round(parseFloat(mem.price) * 100);
 
         // Cobrar con cardToken
-        const payphoneRes = await axios.post(
-          'https://pay.payphonetodoesposible.com/api/transaction/web',
-          {
-            amount: amountCents,
-            amountWithoutTax: amountCents,
-            currency: 'USD',
-            clientTransactionId,
-            storeId: mem.payphone_store_id,
-            reference: `Renovación ${mem.type_name}`,
-            cardToken: mem.card_token,
-            cardHolder: encryptCardHolder(mem.user_name, mem.payphone_coding_password),
-            email: mem.email,
-            phoneNumber: mem.phone ? `+593${mem.phone.replace(/^0/, '')}` : undefined,
-            documentId: mem.cedula,
-            identificationType: 1,
-          },
-          {
-            headers: {
-              'Authorization': `Bearer ${mem.gym_token}`,
-              'Content-Type': 'application/json'
-            },
-            timeout: 15000
-          }
-        );
+       const encryptedHolder = encryptCardHolder(mem.user_name, mem.payphone_coding_password);
+console.log('[CRON] cardHolder encriptado:', encryptedHolder?.substring(0, 30));
+
+const payphoneRes = await axios.post(
+  'https://pay.payphonetodoesposible.com/api/transaction/web',
+  {
+    amount: amountCents,
+    amountWithoutTax: amountCents,
+    currency: 'USD',
+    clientTransactionId,
+    storeId: mem.payphone_store_id,
+    reference: `Renovación ${mem.type_name}`,
+    cardToken: mem.card_token,
+    cardHolder: encryptedHolder,
+    email: mem.email,
+    phoneNumber: mem.phone ? `+593${mem.phone.replace(/^0/, '')}` : undefined,
+    documentId: mem.cedula,
+    identificationType: 1,
+  },
+  {
+    headers: {
+      'Authorization': `Bearer ${mem.gym_token}`,
+      'Content-Type': 'application/json'
+    },
+    timeout: 15000
+  }
+);
+        
 
         const data = payphoneRes.data;
 
