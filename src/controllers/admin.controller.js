@@ -212,12 +212,12 @@ const getMembershipTypes = async (req, res) => {
 
 const createMembershipType = async (req, res) => {
   try {
-    const { name, description, durationValue, durationUnit, price, sessionsPerWeek, isActive, isPublic } = req.body;
+    const { name, description, durationValue, durationUnit, price, sessionsPerWeek, isActive, isPublic, recurringDiscount } = req.body;
     const result = await db.query(`
-      INSERT INTO membership_types (gym_id, name, description, duration_value, duration_unit, price, sessions_per_week, is_active, is_public)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      INSERT INTO membership_types (gym_id, name, description, duration_value, duration_unit, price, sessions_per_week, is_active, is_public, recurring_discount)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       RETURNING *
-    `, [req.gym.id, name, description, durationValue || 1, durationUnit || 'months', price || 0, sessionsPerWeek, isActive !== false, isPublic !== false]);
+    `, [req.gym.id, name, description, durationValue || 1, durationUnit || 'months', price || 0, sessionsPerWeek, isActive !== false, isPublic !== false, recurringDiscount || 0]);
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('Error createMembershipType:', err.message);
@@ -228,16 +228,17 @@ const createMembershipType = async (req, res) => {
 const updateMembershipType = async (req, res) => {
   try {
     const { typeId } = req.params;
-    const { name, description, durationValue, durationUnit, price, sessionsPerWeek, isActive, isPublic } = req.body;
+    const { name, description, durationValue, durationUnit, price, sessionsPerWeek, isActive, isPublic, recurringDiscount } = req.body;
     const result = await db.query(`
       UPDATE membership_types SET
         name = COALESCE($1,name), description = COALESCE($2,description),
         duration_value = COALESCE($3,duration_value), duration_unit = COALESCE($4,duration_unit),
         price = COALESCE($5,price), sessions_per_week = COALESCE($6,sessions_per_week),
         is_active = COALESCE($7,is_active), is_public = COALESCE($8,is_public),
+        recurring_discount = COALESCE($9,recurring_discount),
         updated_at = NOW()
-      WHERE id = $9 AND gym_id = $10 RETURNING *
-    `, [name, description, durationValue, durationUnit, price, sessionsPerWeek, isActive, isPublic, typeId, req.gym.id]);
+      WHERE id = $10 AND gym_id = $11 RETURNING *
+    `, [name, description, durationValue, durationUnit, price, sessionsPerWeek, isActive, isPublic, recurringDiscount, typeId, req.gym.id]);
     if (!result.rows.length) return res.status(404).json({ error: 'Plan no encontrado' });
     res.json(result.rows[0]);
   } catch (err) {
