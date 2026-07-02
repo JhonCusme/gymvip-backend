@@ -179,15 +179,23 @@ const confirmPayment = async (req, res) => {
     else if (duration_unit === 'years') endDate.setFullYear(endDate.getFullYear() + duration_value);
 
     // Crear membresía
-    const memResult = await db.query(`
-      INSERT INTO memberships (user_id, gym_id, membership_type_id, start_date, end_date, status)
-      VALUES ($1, $2, $3, $4, $5, 'active')
-      RETURNING id
-    `, [
-      intent.user_id, intent.gym_id, intent.membership_type_id,
-      startDate.toISOString().split('T')[0],
-      endDate.toISOString().split('T')[0]
-    ]);
+   // Verificar si el usuario tiene consentimiento firmado para auto_renew
+const userConsent = await db.query(
+  'SELECT payphone_consent_signed FROM users WHERE id = $1',
+  [intent.user_id]
+);
+const autoRenew = userConsent.rows[0]?.payphone_consent_signed && !!payphoneData.cardToken;
+
+const memResult = await db.query(`
+  INSERT INTO memberships (user_id, gym_id, membership_type_id, start_date, end_date, status, auto_renew)
+  VALUES ($1, $2, $3, $4, $5, 'active', $6)
+  RETURNING id
+`, [
+  intent.user_id, intent.gym_id, intent.membership_type_id,
+  startDate.toISOString().split('T')[0],
+  endDate.toISOString().split('T')[0],
+  autoRenew
+]);
 
     // Registrar pago
     await db.query(`
