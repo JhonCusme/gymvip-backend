@@ -54,7 +54,12 @@ const initPayment = async (req, res) => {
     `, [clientTransactionId, userId, gymId, membershipTypeId, plan.price]);
 
     // El amount en PayPhone va en centavos (enteros)
-    const amountCents = Math.round(plan.price * 100);
+    const recurringDiscount = parseFloat(plan.recurring_discount || 0);
+const wantsRecurring = req.query.recurring === 'true';
+const finalPrice = wantsRecurring && recurringDiscount > 0
+  ? plan.price * (1 - recurringDiscount / 100)
+  : plan.price;
+const amountCents = Math.round(finalPrice * 100);
 
     // Devolver parámetros al frontend para renderizar la cajita
     res.json({
@@ -74,11 +79,12 @@ const initPayment = async (req, res) => {
       identificationType: 1, // Cédula
       // Info del plan para mostrar al usuario
       plan: {
-        name: plan.name,
-        price: plan.price,
-        durationValue: plan.duration_value,
-        durationUnit: plan.duration_unit
-      }
+  name: plan.name,
+  price: plan.price,
+  durationValue: plan.duration_value,
+  durationUnit: plan.duration_unit,
+  recurringDiscount: recurringDiscount
+}
     });
 
   } catch (err) {
