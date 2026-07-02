@@ -417,13 +417,14 @@ const processRecurringPayments = async () => {
 console.log('[CRON] codingPassword disponible:', !!mem.payphone_coding_password);
         // Encriptar nombre del titular con AES-256-CBC
         const encryptCardHolder = (name, password) => {
-          const key = crypto.scryptSync(password, 'salt', 32);
-          const iv = crypto.randomBytes(16);
-          const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
-          let encrypted = cipher.update(name, 'utf8', 'base64');
-          encrypted += cipher.final('base64');
-          return iv.toString('base64') + ':' + encrypted;
-        };
+  const key = Buffer.alloc(32);
+  Buffer.from(password, 'utf8').copy(key);
+  const iv = Buffer.alloc(16); // IV vacío (ceros)
+  const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+  let encrypted = cipher.update(name, 'utf8', 'base64');
+  encrypted += cipher.final('base64');
+  return encrypted;
+};
 
         const clientTransactionId = `REC-${mem.user_id.substring(0,8)}-${Date.now()}`;
         const amountCents = Math.round(parseFloat(mem.price) * 100);
@@ -446,8 +447,32 @@ const payphoneRes = await axios.post(
     email: mem.email,
     phoneNumber: mem.phone ? `+593${mem.phone.replace(/^0/, '')}` : undefined,
     documentId: mem.cedula,
-    identificationType: 1,
-  },
+            identificationType: 1,
+            order: {
+              billTo: {
+                address1: 'Ecuador',
+                address2: '',
+                country: 'EC',
+                state: 'Guayas',
+                locality: 'Guayaquil',
+                firstName: mem.user_name.split(' ')[0] || mem.user_name,
+                lastName: mem.user_name.split(' ')[1] || '',
+                phoneNumber: mem.phone ? `+593${mem.phone.replace(/^0/, '')}` : '+593000000000',
+                email: mem.email || '',
+                postalCode: '090101',
+                ipAddress: '127.0.0.1'
+              },
+              lineItems: [{
+                productName: `Membresía ${mem.type_name}`,
+                unitPrice: amountCents,
+                quantity: 1,
+                totalAmount: amountCents,
+                taxAmount: 0,
+                productSKU: `MEM-${mem.membership_type_id.substring(0, 8)}`,
+                productDescription: `Renovación automática membresía ${mem.type_name}`
+              }]
+            },
+          },
   {
     headers: {
       'Authorization': `Bearer ${mem.gym_token}`,
