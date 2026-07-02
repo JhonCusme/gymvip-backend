@@ -2,11 +2,12 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('../config/database');
 
+
 // POST /api/auth/login
 // Body: { cedula, password, gym } (gym es el slug)
 const login = async (req, res) => {
   try {
-    const { cedula, password, gym } = req.body;
+    const { cedula, password, gym, role: selectedRole } = req.body;
 
     if (!cedula || !password) {
       return res.status(400).json({ error: 'Cédula y contraseña son requeridas' });
@@ -93,6 +94,29 @@ const login = async (req, res) => {
 
     const roles = roleResult.rows.map(r => r.role);
     const primaryRole = roles[0]; // rol de mayor prioridad
+    
+    // Si viene un rol seleccionado específico, usarlo directamente
+    if (selectedRole && roles.includes(selectedRole)) {
+      const role = selectedRole;
+      const token = jwt.sign(
+        { userId: user.id, gymId: gymData.id, gymSlug: gymData.slug, role },
+        process.env.JWT_SECRET,
+        { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+      );
+      const redirectMap = {
+        admin: '/dashboard',
+        recepcionista: '/recepcion',
+        instructor: '/instructor',
+        user: '/usuario/home'
+      };
+      return res.json({
+        token,
+        role,
+        user: { id: user.id, cedula: user.cedula, name: user.name, email: user.email, phone: user.phone, role, qrCode: user.qr_code },
+        gym: { id: gymData.id, slug: gymData.slug, name: gymData.name, logoUrl: gymData.logo_url, primaryColor: gymData.primary_color, secondaryColor: gymData.secondary_color, theme: gymData.theme, payphoneEnabled: gymData.payphone_enabled || false },
+        redirectTo: redirectMap[role] || '/usuario/home'
+      });
+    }
 
     // 7. Si tiene múltiples roles, devolver lista para que el frontend muestre selección
     if (roles.length > 1) {
