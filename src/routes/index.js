@@ -163,6 +163,17 @@ router.get('/usuario/payment-result', payphoneCtrl.paymentResult); // sin auth �
 
 // Configuración PayPhone del Admin
 router.post('/admin/settings/payphone', ...adminAuth, payphoneCtrl.saveGymPayphoneCredentials);
+router.get('/admin/settings/payphone', ...adminAuth, async (req, res) => {
+  try {
+    const result = await db.query(
+      'SELECT payphone_store_id as "storeId", payphone_token as "token" FROM gyms WHERE id = $1',
+      [req.gym.id]
+    );
+    res.json(result.rows[0] || {});
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
 
 // GET membresías activas del gym
 router.get('/admin/memberships-list', ...adminAuth, async (req, res) => {
