@@ -12,7 +12,11 @@ const getUsers = async (req, res) => {
     const { search, page = 1, limit = 50 } = req.query;
     const offset = (page - 1) * limit;
 
-    let whereClause = 'WHERE ugr.gym_id = $1 AND ugr.role = \'user\'';
+    let whereClause = `WHERE ugr.gym_id = $1 AND ugr.role = 'user'
+      AND ugr.user_id NOT IN (
+        SELECT user_id FROM user_gym_roles 
+        WHERE gym_id = $1 AND role IN ('admin', 'instructor', 'recepcionista') AND is_active = TRUE
+      )`;
     const params = [gymId];
 
     if (search) {
