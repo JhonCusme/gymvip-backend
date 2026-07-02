@@ -232,12 +232,13 @@ const memResult = await db.query(`
     ]);
 
     // Guardar cardToken si viene (para cobro automático futuro)
-    if (payphoneData.cardToken) {
-      await db.query(
-        'UPDATE users SET payphone_token = $1, payphone_token_date = NOW() WHERE id = $2',
-        [payphoneData.cardToken, intent.user_id]
-      );
-    }
+   const cardToken = req.body.ctoken || payphoneData.cardToken || payphoneData.ctoken;
+if (cardToken) {
+  await db.query(
+    'UPDATE users SET payphone_token = $1, payphone_token_date = NOW() WHERE id = $2',
+    [cardToken, intent.user_id]
+  );
+}
 
     // Marcar intención como completada
     await db.query(
