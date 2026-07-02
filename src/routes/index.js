@@ -324,4 +324,15 @@ router.get('/gym/:slug/info', async (req, res) => {
   }
 });
 
+// SOLO PRUEBAS — eliminar en producción
+router.post('/super/test-recurring', authenticate, requireSuperAdmin, async (req, res) => {
+  try {
+    const { processRecurringPayments } = require('../controllers/payphone.controller');
+    await processRecurringPayments();
+    res.json({ message: 'Cobro recurrente ejecutado' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
