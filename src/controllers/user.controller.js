@@ -335,7 +335,7 @@ const getNotifications = async (req, res) => {
 const getMembershipPlans = async (req, res) => {
   try {
     const result = await db.query(
-      'SELECT * FROM membership_types WHERE gym_id=$1 AND is_active=TRUE ORDER BY price ASC',
+      'SELECT * FROM membership_types WHERE gym_id=$1 AND is_active=TRUE AND is_public=TRUE ORDER BY price ASC',
       [req.gym.id]
     );
     res.json(result.rows);
