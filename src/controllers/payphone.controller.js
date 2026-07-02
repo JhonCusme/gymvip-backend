@@ -528,8 +528,7 @@ const payphoneRes = await axios.post(
         }
       } catch (err) {
         console.error(`[CRON] Error procesando cobro para usuario ${mem.user_id}:`, err.message);
-        console.error(`[CRON] Detalle:`, err.response?.data);
-      }
+console.error(`[CRON] Detalle completo:`, JSON.stringify(err.response?.data, null, 2));      }
     }
   } catch (err) {
     console.error('[CRON] Error en processRecurringPayments:', err.message);
