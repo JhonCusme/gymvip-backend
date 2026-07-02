@@ -400,14 +400,24 @@ const deleteSchedule = async (req, res) => {
 const getInstructors = async (req, res) => {
   try {
     const result = await db.query(`
-      SELECT i.*, COUNT(sch.id) as schedule_count
+      SELECT i.*, COUNT(sch.id) as schedule_count,
+             u.id as user_id,
+             EXISTS(
+               SELECT 1 FROM user_gym_roles ugr 
+               WHERE ugr.user_id = u.id AND ugr.gym_id = $1 
+               AND ugr.role = 'user' AND ugr.is_active = TRUE
+             ) as has_user_role
       FROM instructors i
       LEFT JOIN schedules sch ON sch.instructor_id = i.id AND sch.is_active = TRUE
+      LEFT JOIN users u ON u.cedula = i.cedula AND u.id IN (
+        SELECT user_id FROM user_gym_roles WHERE gym_id = $1
+      )
       WHERE i.gym_id = $1
-      GROUP BY i.id ORDER BY i.name
+      GROUP BY i.id, u.id ORDER BY i.name
     `, [req.gym.id]);
     res.json(result.rows);
   } catch (err) {
+    console.error('Error getInstructors:', err.message);
     res.status(500).json({ error: 'Error interno' });
   }
 };
