@@ -209,7 +209,7 @@ const userConsent = await db.query(
   'SELECT payphone_consent_signed FROM users WHERE id = $1',
   [intent.user_id]
 );
-const cardToken = req.body.ctoken || payphoneData.cardToken || payphoneData.ctoken;
+
 const autoRenew = userConsent.rows[0]?.payphone_consent_signed && !!cardToken;
 
 const memResult = await db.query(`
