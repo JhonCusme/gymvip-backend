@@ -127,7 +127,8 @@ const login = async (req, res) => {
         logoUrl: gymData.logo_url,
         primaryColor: gymData.primary_color,
         secondaryColor: gymData.secondary_color,
-        theme: gymData.theme
+        theme: gymData.theme,
+        payphoneEnabled: gymData.payphone_enabled || false
       },
       redirectTo: redirectMap[role] || '/usuario/home'
     });
