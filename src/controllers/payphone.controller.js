@@ -209,7 +209,8 @@ const userConsent = await db.query(
   'SELECT payphone_consent_signed FROM users WHERE id = $1',
   [intent.user_id]
 );
-const autoRenew = userConsent.rows[0]?.payphone_consent_signed && !!payphoneData.cardToken;
+const cardToken = req.body.ctoken || payphoneData.cardToken || payphoneData.ctoken;
+const autoRenew = userConsent.rows[0]?.payphone_consent_signed && !!cardToken;
 
 const memResult = await db.query(`
   INSERT INTO memberships (user_id, gym_id, membership_type_id, start_date, end_date, status, auto_renew)
