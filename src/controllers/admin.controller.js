@@ -401,6 +401,7 @@ const getInstructors = async (req, res) => {
   try {
     const result = await db.query(`
       SELECT i.*, COUNT(sch.id) as schedule_count,
+             u.cedula,
              EXISTS(
                SELECT 1 FROM user_gym_roles ugr 
                WHERE ugr.user_id = i.user_id AND ugr.gym_id = $1 
@@ -408,8 +409,9 @@ const getInstructors = async (req, res) => {
              ) as has_user_role
       FROM instructors i
       LEFT JOIN schedules sch ON sch.instructor_id = i.id AND sch.is_active = TRUE
+      LEFT JOIN users u ON u.id = i.user_id
       WHERE i.gym_id = $1
-      GROUP BY i.id ORDER BY i.name
+      GROUP BY i.id, u.cedula ORDER BY i.name
     `, [req.gym.id]);
     res.json(result.rows);
   } catch (err) {
