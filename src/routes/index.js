@@ -19,6 +19,53 @@ router.post('/auth/login', authCtrl.login);
 router.get('/auth/me', authenticate, loadGym, authCtrl.getMe);
 router.post('/auth/change-password', authenticate, authCtrl.changePassword);
 
+
+// Manifest dinámico por gym
+router.get('/gym/:slug/manifest.json', async (req, res) => {
+  try {
+    const result = await db.query(
+      'SELECT name, logo_url, primary_color FROM gyms WHERE slug = $1 AND is_active = TRUE',
+      [req.params.slug]
+    );
+    
+    if (!result.rows.length) {
+      return res.status(404).json({ error: 'Gym no encontrado' });
+    }
+    
+    const gym = result.rows[0];
+    const manifest = {
+      name: gym.name,
+      short_name: gym.name.substring(0, 12),
+      description: `App de ${gym.name} - Gestiona tu membresía y reservas`,
+      start_url: `/login?gym=${req.params.slug}`,
+      display: 'standalone',
+      background_color: '#0a0a0a',
+      theme_color: gym.primary_color || '#E85D04',
+      orientation: 'portrait',
+      icons: [
+        {
+          src: gym.logo_url || '/icon-192.png',
+          sizes: '192x192',
+          type: 'image/png',
+          purpose: 'any maskable'
+        },
+        {
+          src: gym.logo_url || '/icon-512.png',
+          sizes: '512x512',
+          type: 'image/png',
+          purpose: 'any maskable'
+        }
+      ]
+    };
+    
+    res.setHeader('Content-Type', 'application/manifest+json');
+    res.json(manifest);
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+
 // Upload logo del gym
 router.post('/super/upload-logo', authenticate, requireSuperAdmin, uploadGymLogo.single('logo'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No se subió ninguna imagen' });
