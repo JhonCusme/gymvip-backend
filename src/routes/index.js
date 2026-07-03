@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { authenticate, requireRole, requireSuperAdmin, loadGym, requireAdminOrHeadCoach } = require('../middleware/auth');
+const { authenticate, requireRole, requireSuperAdmin, loadGym, requireAdminOrHeadCoach, requireStaffForWod } = require('../middleware/auth');
 const { uploadGymLogo, uploadInstructorPhoto } = require('../config/cloudinary');
 const db = require('../config/database');
 
@@ -101,6 +101,7 @@ router.get('/super/themes', authenticate, requireSuperAdmin, superCtrl.getThemes
 // ============================================================
 const adminAuth = [authenticate, loadGym, requireRole('admin', 'super_admin')];
 const wodAuth = [authenticate, requireAdminOrHeadCoach];
+const wodReadAuth = [authenticate, requireStaffForWod];
 
 // Actualizar perfil del admin
 router.put('/admin/profile', ...adminAuth, async (req, res) => {
@@ -279,7 +280,7 @@ router.get('/admin/memberships-list', ...adminAuth, async (req, res) => {
 // ============================================================
 // WODs
 // ============================================================
-router.get('/admin/wods', ...wodAuth, async (req, res) => {
+router.get('/admin/wods', ...wodReadAuth, async (req, res) => {
   try {
     const { month, year } = req.query;
     const result = await db.query(`
@@ -298,7 +299,7 @@ router.get('/admin/wods', ...wodAuth, async (req, res) => {
   }
 });
 
-router.get('/admin/wods/:date', ...wodAuth, async (req, res) => {
+router.get('/admin/wods/:date', ...wodReadAuth, async (req, res) => {
   try {
     const result = await db.query(
       'SELECT * FROM wods WHERE gym_id = $1 AND wod_date = $2',
