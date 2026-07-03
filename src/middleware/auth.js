@@ -111,4 +111,51 @@ const loadGym = async (req, res, next) => {
   }
 };
 
-module.exports = { authenticate, requireRole, requireSuperAdmin, loadGym };
+// Permite acceso si es admin/super_admin O instructor head coach
+const requireAdminOrHeadCoach = async (req, res, next) => {
+  try {
+    if (req.user.is_super_admin) return next();
+
+    if (!req.gymSlug) {
+      return res.status(400).json({ error: 'Gym no especificado' });
+    }
+
+    const gymResult = await db.query(
+      'SELECT id FROM gyms WHERE slug = $1 AND is_active = TRUE',
+      [req.gymSlug]
+    );
+    if (!gymResult.rows.length) {
+      return res.status(404).json({ error: 'Gimnasio no encontrado' });
+    }
+    req.gym = gymResult.rows[0];
+
+    // ¿Es admin?
+    const adminRole = await db.query(
+      `SELECT role FROM user_gym_roles 
+       WHERE user_id = $1 AND gym_id = $2 AND role = 'admin' AND is_active = TRUE`,
+      [req.user.id, req.gym.id]
+    );
+    if (adminRole.rows.length) {
+      req.userRole = 'admin';
+      return next();
+    }
+
+    // ¿Es instructor head coach?
+    const headCoach = await db.query(
+      `SELECT id FROM instructors 
+       WHERE user_id = $1 AND gym_id = $2 AND is_head_coach = TRUE AND is_active = TRUE`,
+      [req.user.id, req.gym.id]
+    );
+    if (headCoach.rows.length) {
+      req.userRole = 'head_coach';
+      return next();
+    }
+
+    return res.status(403).json({ error: 'Solo administradores o head coaches pueden gestionar WODs' });
+  } catch (err) {
+    console.error('Error en requireAdminOrHeadCoach:', err);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+module.exports = { authenticate, requireRole, requireSuperAdmin, loadGym, requireAdminOrHeadCoach };

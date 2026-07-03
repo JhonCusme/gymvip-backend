@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { authenticate, requireRole, requireSuperAdmin, loadGym } = require('../middleware/auth');
+const { authenticate, requireRole, requireSuperAdmin, loadGym, requireAdminOrHeadCoach } = require('../middleware/auth');
 const { uploadGymLogo, uploadInstructorPhoto } = require('../config/cloudinary');
 const db = require('../config/database');
 
@@ -100,6 +100,7 @@ router.get('/super/themes', authenticate, requireSuperAdmin, superCtrl.getThemes
 // ADMIN DEL GYM
 // ============================================================
 const adminAuth = [authenticate, loadGym, requireRole('admin', 'super_admin')];
+const wodAuth = [authenticate, requireAdminOrHeadCoach];
 
 // Actualizar perfil del admin
 router.put('/admin/profile', ...adminAuth, async (req, res) => {
@@ -278,7 +279,7 @@ router.get('/admin/memberships-list', ...adminAuth, async (req, res) => {
 // ============================================================
 // WODs
 // ============================================================
-router.get('/admin/wods', ...adminAuth, async (req, res) => {
+router.get('/admin/wods', ...wodAuth, async (req, res) => {
   try {
     const { month, year } = req.query;
     const result = await db.query(`
@@ -297,7 +298,7 @@ router.get('/admin/wods', ...adminAuth, async (req, res) => {
   }
 });
 
-router.get('/admin/wods/:date', ...adminAuth, async (req, res) => {
+router.get('/admin/wods/:date', ...wodAuth, async (req, res) => {
   try {
     const result = await db.query(
       'SELECT * FROM wods WHERE gym_id = $1 AND wod_date = $2',
@@ -309,7 +310,7 @@ router.get('/admin/wods/:date', ...adminAuth, async (req, res) => {
   }
 });
 
-router.post('/admin/wods', ...adminAuth, async (req, res) => {
+router.post('/admin/wods', ...wodAuth, async (req, res) => {
   try {
     const { date, title, description, warmup, workout, cooldown, notes, difficulty } = req.body;
     if (!date) return res.status(400).json({ error: 'Fecha requerida' });
@@ -330,7 +331,7 @@ router.post('/admin/wods', ...adminAuth, async (req, res) => {
   }
 });
 
-router.delete('/admin/wods/:date', ...adminAuth, async (req, res) => {
+router.delete('/admin/wods/:date', ...wodAuth, async (req, res) => {
   try {
     await db.query('DELETE FROM wods WHERE gym_id = $1 AND wod_date = $2', [req.gym.id, req.params.date]);
     res.json({ message: 'WOD eliminado' });
