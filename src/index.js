@@ -7,7 +7,6 @@ const rateLimit = require('express-rate-limit');
 const cron = require('node-cron');
 const db = require('./config/database');
 const routes = require('./routes/index');
-const helmet = require('helmet');
 
 const app = express();
 app.use(helmet({
