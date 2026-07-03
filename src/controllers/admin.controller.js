@@ -431,12 +431,11 @@ const getInstructors = async (req, res) => {
 
 const createInstructor = async (req, res) => {
   try {
-    const { name, photoUrl, specialization, phone, cedula, password, bio, isActive } = req.body;
+    const { name, photoUrl, specialization, phone, cedula, password, bio, isActive, isHeadCoach } = req.body;
     const gymId = req.gym.id;
 
     let userId = null;
     if (cedula && password) {
-      // Crear cuenta de usuario para el instructor
       const hash = await bcrypt.hash(password, 10);
       const existUser = await db.query('SELECT id FROM users WHERE cedula = $1', [cedula]);
       if (!existUser.rows.length) {
@@ -448,7 +447,6 @@ const createInstructor = async (req, res) => {
       } else {
         userId = existUser.rows[0].id;
       }
-      // Asignar rol instructor en el gym
       await db.query(`
         INSERT INTO user_gym_roles (user_id, gym_id, role) VALUES ($1,$2,'instructor')
         ON CONFLICT (user_id, gym_id, role) DO UPDATE SET is_active = TRUE
@@ -456,9 +454,9 @@ const createInstructor = async (req, res) => {
     }
 
     const result = await db.query(`
-      INSERT INTO instructors (gym_id, user_id, name, photo_url, specialization, phone, bio, is_active)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *
-    `, [gymId, userId, name, photoUrl, specialization, phone, bio, isActive !== false]);
+      INSERT INTO instructors (gym_id, user_id, name, photo_url, specialization, phone, bio, is_active, is_head_coach)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *
+    `, [gymId, userId, name, photoUrl, specialization, phone, bio, isActive !== false, isHeadCoach === true]);
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('Error createInstructor:', err);
@@ -469,19 +467,19 @@ const createInstructor = async (req, res) => {
 const updateInstructor = async (req, res) => {
   try {
     const { instructorId } = req.params;
-    const { name, photoUrl, specialization, phone, bio, isActive } = req.body;
+    const { name, photoUrl, specialization, phone, bio, isActive, isHeadCoach } = req.body;
     const result = await db.query(`
       UPDATE instructors SET name=COALESCE($1,name), photo_url=COALESCE($2,photo_url),
         specialization=COALESCE($3,specialization), phone=COALESCE($4,phone),
-        bio=COALESCE($5,bio), is_active=COALESCE($6,is_active), updated_at=NOW()
-      WHERE id=$7 AND gym_id=$8 RETURNING *
-    `, [name, photoUrl, specialization, phone, bio, isActive, instructorId, req.gym.id]);
+        bio=COALESCE($5,bio), is_active=COALESCE($6,is_active),
+        is_head_coach=COALESCE($7,is_head_coach), updated_at=NOW()
+      WHERE id=$8 AND gym_id=$9 RETURNING *
+    `, [name, photoUrl, specialization, phone, bio, isActive, isHeadCoach, instructorId, req.gym.id]);
     res.json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: 'Error interno' });
   }
 };
-
 const deleteInstructor = async (req, res) => {
   try {
     await db.query('UPDATE instructors SET is_active=FALSE WHERE id=$1 AND gym_id=$2', [req.params.instructorId, req.gym.id]);
