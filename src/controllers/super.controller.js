@@ -30,7 +30,6 @@ const createGym = async (req, res) => {
 
     if (!slug || !name) return res.status(400).json({ error: 'Slug y nombre son requeridos' });
 
-    // Verificar slug único
     const exists = await db.query('SELECT id FROM gyms WHERE slug = $1', [slug]);
     if (exists.rows.length) return res.status(400).json({ error: 'El slug ya está en uso' });
 
@@ -42,6 +41,19 @@ const createGym = async (req, res) => {
     `, [slug, name, logoUrl, email, phone, address,
         payphoneEnabled || false, bookingAdvanceDays || 7,
         primaryColor || '#E85D04', secondaryColor || '#000000', theme || 'classic_red']);
+
+    const newGymId = result.rows[0].id;
+
+    // Crear planes automáticos al crear el gym
+    await db.query(`
+      INSERT INTO membership_types (gym_id, name, description, duration_value, duration_unit, price, is_active, is_public)
+      VALUES ($1, 'Admin - Acceso Indefinido', 'Membresía gratuita para administradores', 99, 'years', 0, TRUE, FALSE)
+    `, [newGymId]);
+
+    await db.query(`
+      INSERT INTO membership_types (gym_id, name, description, duration_value, duration_unit, price, is_active, is_public)
+      VALUES ($1, 'Beca Staff', 'Membresía gratuita para instructores y recepcionistas', 1, 'years', 0, TRUE, FALSE)
+    `, [newGymId]);
 
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -216,20 +228,6 @@ const createMembershipPlan = async (req, res) => {
       INSERT INTO membership_types (gym_id, name, description, duration_value, duration_unit, price, sessions_per_week, is_active)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *
     `, [gymId, name, description, durationValue || 1, durationUnit || 'months', price || 0, sessionsPerWeek, isActive !== false]);
-
-    const gymId = result.rows[0].id;
-
-    // Crear plan de membresía gratuita para admins automáticamente
-    await db.query(`
-      INSERT INTO membership_types (gym_id, name, description, duration_value, duration_unit, price, is_active, is_public)
-      VALUES ($1, 'Admin - Acceso Indefinido', 'Membresía gratuita para administradores', 99, 'years', 0, TRUE, FALSE)
-    `, [gymId]);
-
-    // Crear plan de beca para staff
-    await db.query(`
-      INSERT INTO membership_types (gym_id, name, description, duration_value, duration_unit, price, is_active, is_public)
-      VALUES ($1, 'Beca Staff', 'Membresía gratuita para instructores y recepcionistas', 1, 'years', 0, TRUE, FALSE)
-    `, [gymId]);
 
     res.status(201).json(result.rows[0]);
   } catch (err) {
