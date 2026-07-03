@@ -7,8 +7,13 @@ const rateLimit = require('express-rate-limit');
 const cron = require('node-cron');
 const db = require('./config/database');
 const routes = require('./routes/index');
+const helmet = require('helmet');
 
 const app = express();
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  contentSecurityPolicy: false // deshabilitado para permitir el widget de PayPhone
+}));
 app.set('trust proxy', 1); 
 const PORT = process.env.PORT || 3001;
 
@@ -39,6 +44,13 @@ const loginLimiter = rateLimit({
   message: { error: 'Demasiados intentos de login' }
 });
 app.use('/api/auth/login', loginLimiter);
+// Rate limiting para PayPhone — más estricto
+const payphoneLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minuto
+  max: 10,
+  message: { error: 'Demasiadas solicitudes de pago, espera un momento' }
+});
+app.use('/api/usuario/payphone', payphoneLimiter);
 
 // ============================================================
 // MIDDLEWARE
@@ -46,6 +58,28 @@ app.use('/api/auth/login', loginLimiter);
 app.use(morgan('dev'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+
+// Sanitización básica — eliminar caracteres peligrosos
+app.use((req, res, next) => {
+  const sanitize = (obj) => {
+    if (!obj) return obj;
+    Object.keys(obj).forEach(key => {
+      if (typeof obj[key] === 'string') {
+        // Eliminar tags HTML y scripts
+        obj[key] = obj[key].replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+        obj[key] = obj[key].replace(/<[^>]+>/g, '');
+        obj[key] = obj[key].trim();
+      } else if (typeof obj[key] === 'object') {
+        sanitize(obj[key]);
+      }
+    });
+    return obj;
+  };
+  req.body = sanitize(req.body);
+  req.query = sanitize(req.query);
+  next();
+});
 
 // ============================================================
 // RUTAS
