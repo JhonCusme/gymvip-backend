@@ -497,7 +497,17 @@ const deleteInstructor = async (req, res) => {
 const getReceptionists = async (req, res) => {
   try {
     const result = await db.query(`
-      SELECT u.id, u.cedula, u.name, u.email, u.phone, u.is_active, ugr.created_at
+      SELECT u.id, u.cedula, u.name, u.email, u.phone, u.is_active, ugr.created_at,
+             EXISTS(
+               SELECT 1 FROM user_gym_roles ugr2 
+               WHERE ugr2.user_id = u.id AND ugr2.gym_id = $1 
+               AND ugr2.role = 'user' AND ugr2.is_active = TRUE
+             ) as has_user_role,
+             EXISTS(
+               SELECT 1 FROM memberships m
+               WHERE m.user_id = u.id AND m.gym_id = $1
+               AND m.status = 'active' AND m.end_date >= CURRENT_DATE
+             ) as has_active_membership
       FROM user_gym_roles ugr JOIN users u ON u.id = ugr.user_id
       WHERE ugr.gym_id = $1 AND ugr.role = 'recepcionista' AND ugr.is_active = TRUE
       ORDER BY u.name
