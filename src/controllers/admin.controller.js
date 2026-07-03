@@ -410,7 +410,12 @@ const getInstructors = async (req, res) => {
                SELECT 1 FROM user_gym_roles ugr 
                WHERE ugr.user_id = i.user_id AND ugr.gym_id = $1 
                AND ugr.role = 'user' AND ugr.is_active = TRUE
-             ) as has_user_role
+             ) as has_user_role,
+             EXISTS(
+               SELECT 1 FROM memberships m
+               WHERE m.user_id = i.user_id AND m.gym_id = $1
+               AND m.status = 'active' AND m.end_date >= CURRENT_DATE
+             ) as has_active_membership
       FROM instructors i
       LEFT JOIN schedules sch ON sch.instructor_id = i.id AND sch.is_active = TRUE
       LEFT JOIN users u ON u.id = i.user_id
