@@ -26,7 +26,7 @@ const getGyms = async (req, res) => {
 const createGym = async (req, res) => {
   try {
     const { slug, name, logoUrl, email, phone, address, payphoneEnabled,
-            bookingAdvanceDays, primaryColor, secondaryColor, theme } = req.body;
+        bookingAdvanceDays, primaryColor, secondaryColor, theme, timezone } = req.body;
 
     if (!slug || !name) return res.status(400).json({ error: 'Slug y nombre son requeridos' });
 
@@ -35,12 +35,13 @@ const createGym = async (req, res) => {
 
     const result = await db.query(`
       INSERT INTO gyms (slug, name, logo_url, email, phone, address, payphone_enabled,
-                        booking_advance_days, primary_color, secondary_color, theme)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                        booking_advance_days, primary_color, secondary_color, theme, timezone)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
       RETURNING *
     `, [slug, name, logoUrl, email, phone, address,
         payphoneEnabled || false, bookingAdvanceDays || 7,
-        primaryColor || '#E85D04', secondaryColor || '#000000', theme || 'classic_red']);
+        primaryColor || '#E85D04', secondaryColor || '#000000', theme || 'classic_red',
+        timezone || 'America/Guayaquil']);
 
     const newGymId = result.rows[0].id;
 
@@ -67,7 +68,7 @@ const updateGym = async (req, res) => {
   try {
     const { gymId } = req.params;
     const { name, logoUrl, email, phone, address, payphoneEnabled,
-            bookingAdvanceDays, primaryColor, secondaryColor, theme, isActive } = req.body;
+        bookingAdvanceDays, primaryColor, secondaryColor, theme, isActive, timezone } = req.body;
 
     const result = await db.query(`
       UPDATE gyms SET
@@ -82,11 +83,12 @@ const updateGym = async (req, res) => {
         secondary_color = COALESCE($9, secondary_color),
         theme = COALESCE($10, theme),
         is_active = COALESCE($11, is_active),
+        timezone = COALESCE($13, timezone),
         updated_at = NOW()
       WHERE id = $12
       RETURNING *
     `, [name, logoUrl, email, phone, address, payphoneEnabled,
-        bookingAdvanceDays, primaryColor, secondaryColor, theme, isActive, gymId]);
+        bookingAdvanceDays, primaryColor, secondaryColor, theme, isActive, gymId, timezone]);
 
     if (!result.rows.length) return res.status(404).json({ error: 'Gym no encontrado' });
     res.json(result.rows[0]);
