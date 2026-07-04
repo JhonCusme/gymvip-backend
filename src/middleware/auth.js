@@ -94,7 +94,7 @@ const loadGym = async (req, res, next) => {
     const result = await db.query(
       `SELECT id, slug, name, logo_url, email, phone, address, 
               primary_color, secondary_color, theme, booking_advance_days,
-              is_active, payphone_enabled
+              is_active, payphone_enabled, timezone
        FROM gyms WHERE slug = $1`,
       [slug]
     );

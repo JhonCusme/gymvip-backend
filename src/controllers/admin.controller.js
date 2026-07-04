@@ -737,16 +737,17 @@ const getAttendanceHistory = async (req, res) => {
       dateCondition += ` AND DATE(check_in_time) <= $${params.length}`; 
     }
 
+    const tz = req.gym.timezone || 'America/Guayaquil';
     const kpis = await db.query(`
       SELECT 
         COUNT(*) as total_ingresos,
         COUNT(DISTINCT user_id) as usuarios_unicos,
         COUNT(DISTINCT membership_id) as membresias_validas,
         COALESCE(
-          (SELECT EXTRACT(HOUR FROM check_in_time)::text || ':00'
+          (SELECT EXTRACT(HOUR FROM check_in_time AT TIME ZONE 'UTC' AT TIME ZONE '${tz}')::text || ':00'
            FROM attendance 
            WHERE gym_id = $1 ${dateCondition}
-           GROUP BY EXTRACT(HOUR FROM check_in_time)
+           GROUP BY EXTRACT(HOUR FROM check_in_time AT TIME ZONE 'UTC' AT TIME ZONE '${tz}')
            ORDER BY COUNT(*) DESC LIMIT 1),
           '--:--'
         ) as hora_pico
