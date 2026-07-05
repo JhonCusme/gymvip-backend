@@ -744,10 +744,10 @@ const getAttendanceHistory = async (req, res) => {
         COUNT(DISTINCT user_id) as usuarios_unicos,
         COUNT(DISTINCT membership_id) as membresias_validas,
         COALESCE(
-          (SELECT EXTRACT(HOUR FROM check_in_time AT TIME ZONE 'UTC' AT TIME ZONE '${tz}')::text || ':00'
+          (SELECT EXTRACT(HOUR FROM check_in_time AT TIME ZONE '${tz}')::text || ':00'
            FROM attendance 
            WHERE gym_id = $1 ${dateCondition}
-           GROUP BY EXTRACT(HOUR FROM check_in_time AT TIME ZONE 'UTC' AT TIME ZONE '${tz}')
+           GROUP BY EXTRACT(HOUR FROM check_in_time AT TIME ZONE '${tz}')
            ORDER BY COUNT(*) DESC LIMIT 1),
           '--:--'
         ) as hora_pico
@@ -756,14 +756,14 @@ const getAttendanceHistory = async (req, res) => {
     `, params);
 
     const byDay = await db.query(`
-      SELECT DATE(check_in_time AT TIME ZONE 'UTC' AT TIME ZONE '${tz}') as date, COUNT(*) as count
+      SELECT DATE(check_in_time AT TIME ZONE '${tz}') as date, COUNT(*) as count
       FROM attendance WHERE gym_id = $1 ${dateCondition}
-      GROUP BY DATE(check_in_time AT TIME ZONE 'UTC' AT TIME ZONE '${tz}') ORDER BY date ASC
+      GROUP BY DATE(check_in_time AT TIME ZONE '${tz}') ORDER BY date ASC
     `, params);
 
     const heatmap = await db.query(`
-      SELECT EXTRACT(DOW FROM check_in_time AT TIME ZONE 'UTC' AT TIME ZONE '${tz}')::int as day_of_week,
-             EXTRACT(HOUR FROM check_in_time AT TIME ZONE 'UTC' AT TIME ZONE '${tz}')::int as hour,
+      SELECT EXTRACT(DOW FROM check_in_time AT TIME ZONE '${tz}')::int as day_of_week,
+             EXTRACT(HOUR FROM check_in_time AT TIME ZONE '${tz}')::int as hour,
              COUNT(*) as count
       FROM attendance WHERE gym_id = $1 ${dateCondition}
       GROUP BY day_of_week, hour
