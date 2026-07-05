@@ -600,10 +600,11 @@ const getReports = async (req, res) => {
       FROM payments WHERE gym_id = $1 AND status = 'pagado' ${dateFilter}
     `, [gymId]);
 
+    const tz = req.gym.timezone || 'America/Guayaquil';
     const dailyRevenue = await db.query(`
-      SELECT DATE(created_at) as date, SUM(amount) as total
+      SELECT DATE(created_at AT TIME ZONE '${tz}') as date, SUM(amount) as total
       FROM payments WHERE gym_id = $1 AND status = 'pagado' ${dateFilter}
-      GROUP BY DATE(created_at) ORDER BY date ASC
+      GROUP BY DATE(created_at AT TIME ZONE '${tz}') ORDER BY date ASC
     `, [gymId]);
 
     const membershipsByType = await db.query(`
