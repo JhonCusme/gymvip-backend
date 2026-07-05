@@ -756,14 +756,14 @@ const getAttendanceHistory = async (req, res) => {
     `, params);
 
     const byDay = await db.query(`
-      SELECT DATE(check_in_time) as date, COUNT(*) as count
+      SELECT DATE(check_in_time AT TIME ZONE 'UTC' AT TIME ZONE '${tz}') as date, COUNT(*) as count
       FROM attendance WHERE gym_id = $1 ${dateCondition}
-      GROUP BY DATE(check_in_time) ORDER BY date ASC
+      GROUP BY DATE(check_in_time AT TIME ZONE 'UTC' AT TIME ZONE '${tz}') ORDER BY date ASC
     `, params);
 
     const heatmap = await db.query(`
-      SELECT EXTRACT(DOW FROM check_in_time)::int as day_of_week,
-             EXTRACT(HOUR FROM check_in_time)::int as hour,
+      SELECT EXTRACT(DOW FROM check_in_time AT TIME ZONE 'UTC' AT TIME ZONE '${tz}')::int as day_of_week,
+             EXTRACT(HOUR FROM check_in_time AT TIME ZONE 'UTC' AT TIME ZONE '${tz}')::int as hour,
              COUNT(*) as count
       FROM attendance WHERE gym_id = $1 ${dateCondition}
       GROUP BY day_of_week, hour
