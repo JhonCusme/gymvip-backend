@@ -400,22 +400,27 @@ const saveGymPayphoneCredentials = async (req, res) => {
 const processRecurringPayments = async () => {
   const crypto = require('crypto');
   
-  try {
-    // Buscar membresías que vencen hoy con cobro automático activo
+ try {
+    // Buscar membresías que vencen hoy O que fallaron antes (hasta 3 intentos, dentro de 3 días de gracia)
     const memberships = await db.query(`
       SELECT 
         m.id as membership_id, m.user_id, m.gym_id, m.membership_type_id,
         mt.price, mt.name as type_name, mt.duration_value, mt.duration_unit,
+        mt.recurring_discount,
         u.payphone_token as card_token, u.email, u.phone, u.cedula, u.name as user_name,
         u.payphone_consent_signed,
-        g.payphone_token as gym_token, g.payphone_store_id, g.payphone_coding_password
+        g.payphone_token as gym_token, g.payphone_store_id, g.payphone_coding_password,
+        m.recurring_failed_attempts, m.end_date
       FROM memberships m
       JOIN membership_types mt ON mt.id = m.membership_type_id
       JOIN users u ON u.id = m.user_id
       JOIN gyms g ON g.id = m.gym_id
       WHERE m.auto_renew = TRUE
         AND m.status = 'active'
-        AND m.end_date = CURRENT_DATE
+        AND m.end_date <= CURRENT_DATE
+        AND m.end_date >= CURRENT_DATE - INTERVAL '3 days'
+        AND m.recurring_failed_attempts < 3
+        AND (m.last_charge_attempt IS NULL OR m.last_charge_attempt < CURRENT_DATE)
         AND u.payphone_token IS NOT NULL
         AND u.payphone_consent_signed = TRUE
         AND g.payphone_enabled = TRUE
@@ -505,6 +510,9 @@ const payphoneRes = await axios.post(
           else if (mem.duration_unit === 'months') endDate.setMonth(endDate.getMonth() + mem.duration_value);
           else if (mem.duration_unit === 'years') endDate.setFullYear(endDate.getFullYear() + mem.duration_value);
 
+          // Marcar la membresía vencida como renovada (evita reintentos)
+          await db.query(`UPDATE memberships SET status = 'expired', auto_renew = FALSE WHERE id = $1`, [mem.membership_id]);
+
           // Crear nueva membresía
           const newMem = await db.query(`
             INSERT INTO memberships (user_id, gym_id, membership_type_id, start_date, end_date, status, auto_renew)
@@ -519,7 +527,6 @@ const payphoneRes = await axios.post(
           `, [mem.gym_id, mem.user_id, newMem.rows[0].id, mem.membership_type_id,
               mem.price, data.transactionId?.toString()]);
 
-          // Notificación
           await db.query(`
             INSERT INTO notifications (user_id, gym_id, title, message, type)
             VALUES ($1, $2, '✅ Membresía renovada', $3, 'payment')
@@ -528,14 +535,28 @@ const payphoneRes = await axios.post(
 
           console.log(`[CRON] ✅ Cobro exitoso para usuario ${mem.user_id}`);
         } else {
-          // Cobro fallido — notificar al usuario
+          // Cobro fallido — incrementar contador
+          const newAttempts = (mem.recurring_failed_attempts || 0) + 1;
+          const cancelAutoRenew = newAttempts >= 3;
+
+          await db.query(`
+            UPDATE memberships SET 
+              recurring_failed_attempts = $1,
+              last_charge_attempt = CURRENT_DATE,
+              auto_renew = CASE WHEN $2 THEN FALSE ELSE auto_renew END
+            WHERE id = $3
+          `, [newAttempts, cancelAutoRenew, mem.membership_id]);
+
+          const msg = cancelAutoRenew
+            ? `No pudimos renovar tu membresía "${mem.type_name}" tras 3 intentos. El cobro automático se desactivó. Por favor paga manualmente desde la app.`
+            : `Intento ${newAttempts} de 3 fallido para renovar "${mem.type_name}". Lo intentaremos de nuevo mañana. Puedes pagar manualmente cuando quieras.`;
+
           await db.query(`
             INSERT INTO notifications (user_id, gym_id, title, message, type)
             VALUES ($1, $2, '⚠️ Error en renovación automática', $3, 'payment')
-          `, [mem.user_id, mem.gym_id,
-              `No pudimos renovar tu membresía "${mem.type_name}" automáticamente. Por favor realiza el pago manualmente.`]);
+          `, [mem.user_id, mem.gym_id, msg]);
 
-          console.log(`[CRON] ❌ Cobro fallido para usuario ${mem.user_id}: ${data.message || data.status}`);
+          console.log(`[CRON] ❌ Cobro fallido (intento ${newAttempts}) para usuario ${mem.user_id}`);
         }
       } catch (err) {
         console.error(`[CRON] Error procesando cobro para usuario ${mem.user_id}:`, err.message);
