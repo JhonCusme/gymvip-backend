@@ -26,13 +26,15 @@ const initPayment = async (req, res) => {
       );
       if (!planResult.rows.length) return res.status(404).json({ error: 'Plan no encontrado' });
       const plan = planResult.rows[0];
+      const userDiscountCheck = await db.query('SELECT lost_recurring_discount FROM users WHERE id = $1', [userId]);
       return res.json({
         plan: {
           name: plan.name,
           price: plan.price,
           durationValue: plan.duration_value,
           durationUnit: plan.duration_unit,
-          recurringDiscount: parseFloat(plan.recurring_discount || 0)
+          recurringDiscount: parseFloat(plan.recurring_discount || 0),
+          lostDiscount: userDiscountCheck.rows[0]?.lost_recurring_discount || false
         }
       });
     }
