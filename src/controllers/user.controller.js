@@ -8,13 +8,18 @@ const getHome = async (req, res) => {
     const userId = req.user.id;
     const gymId = req.gym.id;
 
-    // Membresía activa
+    // Membresía activa o la última vencida (para mostrar estado de cobro fallido)
     const membership = await db.query(`
       SELECT m.id, m.start_date, m.end_date, m.status, m.auto_renew,
+             m.recurring_failed_attempts,
              mt.name as type_name, (m.end_date - CURRENT_DATE) as days_remaining
       FROM memberships m JOIN membership_types mt ON mt.id = m.membership_type_id
-      WHERE m.user_id=$1 AND m.gym_id=$2 AND m.status='active' AND m.end_date>=CURRENT_DATE
-      ORDER BY m.end_date DESC LIMIT 1
+      WHERE m.user_id=$1 AND m.gym_id=$2 
+        AND m.status IN ('active', 'expired')
+      ORDER BY 
+        CASE WHEN m.end_date >= CURRENT_DATE THEN 0 ELSE 1 END,
+        m.end_date DESC 
+      LIMIT 1
     `, [userId, gymId]);
 
     // Próximas clases reservadas

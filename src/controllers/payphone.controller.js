@@ -75,7 +75,14 @@ const initPayment = async (req, res) => {
     // El amount en PayPhone va en centavos (enteros)
     const recurringDiscount = parseFloat(plan.recurring_discount || 0);
 const wantsRecurring = req.query.recurring === 'true';
-const finalPrice = wantsRecurring && recurringDiscount > 0
+
+// Verificar si el usuario perdió el descuento (por fallos previos)
+const userCheck = await db.query('SELECT lost_recurring_discount FROM users WHERE id = $1', [userId]);
+const lostDiscount = userCheck.rows[0]?.lost_recurring_discount || false;
+
+// Aplica descuento solo si quiere recurrente Y no perdió el beneficio
+const applyDiscount = wantsRecurring && recurringDiscount > 0 && !lostDiscount;
+const finalPrice = applyDiscount
   ? plan.price * (1 - recurringDiscount / 100)
   : plan.price;
 const amountCents = Math.round(finalPrice * 100);
@@ -241,6 +248,12 @@ if (cardToken) {
     [cardToken, intent.user_id]
   );
 }
+
+// Si el usuario había perdido el descuento, quitarlo del flag (ya pagó su "penalización")
+    // El siguiente cobro recurrente ya tendrá descuento
+    if (autoRenew) {
+      await db.query('UPDATE users SET lost_recurring_discount = FALSE WHERE id = $1', [intent.user_id]);
+    }
 
     // Marcar intención como completada
     await db.query(
@@ -546,6 +559,11 @@ const payphoneRes = await axios.post(
               auto_renew = CASE WHEN $2 THEN FALSE ELSE auto_renew END
             WHERE id = $3
           `, [newAttempts, cancelAutoRenew, mem.membership_id]);
+
+          // Si se canceló por 3 fallos, marcar pérdida del descuento
+          if (cancelAutoRenew) {
+            await db.query('UPDATE users SET lost_recurring_discount = TRUE WHERE id = $1', [mem.user_id]);
+          }
 
           const msg = cancelAutoRenew
             ? `No pudimos renovar tu membresía "${mem.type_name}" tras 3 intentos. El cobro automático se desactivó. Por favor paga manualmente desde la app.`
