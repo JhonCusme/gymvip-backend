@@ -50,4 +50,14 @@ const uploadInstructorPhoto = multer({
   }
 });
 
-module.exports = { cloudinary, uploadGymLogo, uploadInstructorPhoto };
+// Subir firma (base64) directamente a Cloudinary
+const uploadSignature = async (base64Data, userId) => {
+  const result = await cloudinary.uploader.upload(base64Data, {
+    folder: 'gymvip/signatures',
+    public_id: `signature_${userId}_${Date.now()}`,
+    resource_type: 'image'
+  });
+  return result.secure_url;
+};
+
+module.exports = { cloudinary, uploadGymLogo, uploadInstructorPhoto, uploadSignature };

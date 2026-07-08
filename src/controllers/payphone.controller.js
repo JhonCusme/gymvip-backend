@@ -310,12 +310,21 @@ const paymentResult = async (req, res) => {
 // ============================================================
 const signConsent = async (req, res) => {
   try {
-    // Capturar IP real del usuario (considerando proxies)
     const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() 
       || req.socket?.remoteAddress 
       || 'unknown';
-    
-    const consentVersion = 'v1.0'; // versión del texto de consentimiento
+    const consentVersion = 'v1.0';
+    const { signature } = req.body;
+
+    let signatureUrl = null;
+    if (signature && signature.startsWith('data:image')) {
+      try {
+        const { uploadSignature } = require('../config/cloudinary');
+        signatureUrl = await uploadSignature(signature, req.user.id);
+      } catch (e) {
+        console.error('Error subiendo firma:', e.message);
+      }
+    }
 
     await db.query(`
       UPDATE users SET 
@@ -323,9 +332,10 @@ const signConsent = async (req, res) => {
         payphone_consent_date = NOW(),
         consent_ip = $1,
         consent_date = NOW(),
-        consent_version = $2
-      WHERE id = $3
-    `, [ip, consentVersion, req.user.id]);
+        consent_version = $2,
+        consent_signature_url = COALESCE($3, consent_signature_url)
+      WHERE id = $4
+    `, [ip, consentVersion, signatureUrl, req.user.id]);
 
     res.json({ message: 'Consentimiento firmado exitosamente' });
   } catch (err) {
