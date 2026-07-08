@@ -295,12 +295,26 @@ const paymentResult = async (req, res) => {
 // ============================================================
 const signConsent = async (req, res) => {
   try {
-    await db.query(
-      'UPDATE users SET payphone_consent_signed = TRUE, payphone_consent_date = NOW() WHERE id = $1',
-      [req.user.id]
-    );
+    // Capturar IP real del usuario (considerando proxies)
+    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() 
+      || req.socket?.remoteAddress 
+      || 'unknown';
+    
+    const consentVersion = 'v1.0'; // versión del texto de consentimiento
+
+    await db.query(`
+      UPDATE users SET 
+        payphone_consent_signed = TRUE, 
+        payphone_consent_date = NOW(),
+        consent_ip = $1,
+        consent_date = NOW(),
+        consent_version = $2
+      WHERE id = $3
+    `, [ip, consentVersion, req.user.id]);
+
     res.json({ message: 'Consentimiento firmado exitosamente' });
   } catch (err) {
+    console.error('Error signConsent:', err.message);
     res.status(500).json({ error: 'Error interno' });
   }
 };
