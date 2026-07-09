@@ -99,7 +99,8 @@ const getClientDetail = async (req, res) => {
     const gymId = req.gym.id;
 
     const userResult = await db.query(`
-      SELECT u.id, u.cedula, u.name, u.email, u.phone, u.qr_code
+      SELECT u.id, u.cedula, u.name, u.email, u.phone, u.qr_code,
+             u.birth_date, u.emergency_contact_name, u.emergency_contact_phone
       FROM users u
       JOIN user_gym_roles ugr ON ugr.user_id = u.id AND ugr.gym_id = $2 AND ugr.role = 'user'
       WHERE u.id = $1
