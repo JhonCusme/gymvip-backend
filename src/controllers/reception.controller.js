@@ -483,6 +483,7 @@ const validateEntry = async (req, res) => {
 const getAttendance = async (req, res) => {
   try {
     const gymId = req.gym.id;
+    const tz = req.gym.timezone || 'America/Guayaquil';
     const { dateFrom, dateTo } = req.query;
     const params = [gymId];
     let dateCondition = '';
@@ -497,14 +498,14 @@ const getAttendance = async (req, res) => {
     `, params);
 
     const byDay = await db.query(`
-      SELECT DATE(a.check_in_time) as date, COUNT(*) as count
+      SELECT DATE(a.check_in_time AT TIME ZONE '${tz}') as date, COUNT(*) as count
       FROM attendance a WHERE a.gym_id=$1 ${dateCondition}
-      GROUP BY DATE(a.check_in_time) ORDER BY date
+      GROUP BY DATE(a.check_in_time AT TIME ZONE '${tz}') ORDER BY date
     `, params);
 
     const heatmap = await db.query(`
-      SELECT EXTRACT(DOW FROM a.check_in_time)::int as dow,
-             EXTRACT(HOUR FROM a.check_in_time)::int as hour, COUNT(*) as count
+      SELECT EXTRACT(DOW FROM a.check_in_time AT TIME ZONE '${tz}')::int as dow,
+             EXTRACT(HOUR FROM a.check_in_time AT TIME ZONE '${tz}')::int as hour, COUNT(*) as count
       FROM attendance a WHERE a.gym_id=$1 ${dateCondition}
       GROUP BY dow, hour
     `, params);
