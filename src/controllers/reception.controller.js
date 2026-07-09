@@ -139,7 +139,7 @@ const getClientDetail = async (req, res) => {
 const createClient = async (req, res) => {
   try {
     const gymId = req.gym.id;
-    const { cedula, name, email, phone, password } = req.body;
+    const { cedula, name, email, phone, password, birthDate, emergencyContactName, emergencyContactPhone } = req.body;
 
     if (!cedula || !name || !password) {
       return res.status(400).json({ error: 'Cédula, nombre y contraseña son requeridos' });
@@ -158,8 +158,9 @@ const createClient = async (req, res) => {
 
     const hash = await bcrypt.hash(password, 10);
     const newUser = await db.query(
-      'INSERT INTO users (cedula, name, email, phone, password_hash) VALUES ($1,$2,$3,$4,$5) RETURNING id',
-      [cedula, name, email, phone, hash]
+      `INSERT INTO users (cedula, name, email, phone, password_hash, birth_date, emergency_contact_name, emergency_contact_phone) 
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+      [cedula, name, email, phone, hash, birthDate || null, emergencyContactName || null, emergencyContactPhone || null]
     );
     const userId = newUser.rows[0].id;
 
