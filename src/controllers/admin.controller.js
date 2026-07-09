@@ -644,8 +644,20 @@ const getDashboard = async (req, res) => {
 
     const kpis = await db.query(`
       SELECT
-        (SELECT COUNT(*) FROM user_gym_roles WHERE gym_id=$1 AND role='user' AND is_active=TRUE) as total_users,
-        (SELECT COUNT(*) FROM memberships WHERE gym_id=$1 AND status='active' AND end_date>=CURRENT_DATE) as active_members,
+        (SELECT COUNT(*) FROM user_gym_roles ugr WHERE ugr.gym_id=$1 AND ugr.role='user' AND ugr.is_active=TRUE
+          AND ugr.user_id NOT IN (
+            SELECT user_id FROM user_gym_roles WHERE gym_id=$1 AND role IN ('admin','instructor','recepcionista') AND is_active=TRUE
+          )) as total_users,
+        (SELECT COUNT(*) FROM memberships m WHERE m.gym_id=$1 AND m.status='active' AND m.end_date>=CURRENT_DATE
+          AND m.user_id NOT IN (
+            SELECT user_id FROM user_gym_roles WHERE gym_id=$1 AND role IN ('admin','instructor','recepcionista') AND is_active=TRUE
+          )) as active_members,
+        (SELECT COUNT(*) FROM memberships m WHERE m.gym_id=$1 AND m.status='active' AND m.end_date>=CURRENT_DATE
+          AND EXISTS (SELECT 1 FROM payments p WHERE p.membership_id=m.id AND p.method NOT IN ('cortesia','beca'))
+        ) as paid_members,
+        (SELECT COUNT(*) FROM memberships m WHERE m.gym_id=$1 AND m.status='active' AND m.end_date>=CURRENT_DATE
+          AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.membership_id=m.id AND p.method NOT IN ('cortesia','beca'))
+        ) as free_members,
         (SELECT COUNT(*) FROM bookings b JOIN class_instances ci ON ci.id=b.class_instance_id WHERE b.gym_id=$1 AND ci.class_date=CURRENT_DATE AND b.status='confirmed') as reservas_hoy,
         (SELECT COUNT(*) FROM memberships WHERE gym_id=$1 AND status='active' AND end_date BETWEEN CURRENT_DATE AND CURRENT_DATE+7) as por_vencer
     `, [gymId]);
