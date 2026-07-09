@@ -8,7 +8,10 @@ const getDashboard = async (req, res) => {
 
     const kpis = await db.query(`
       SELECT
-        (SELECT COUNT(*) FROM user_gym_roles WHERE gym_id=$1 AND role='user' AND is_active=TRUE) as total_clients,
+        (SELECT COUNT(*) FROM user_gym_roles ugr WHERE ugr.gym_id=$1 AND ugr.role='user' AND ugr.is_active=TRUE
+          AND ugr.user_id NOT IN (
+            SELECT user_id FROM user_gym_roles WHERE gym_id=$1 AND role IN ('admin','instructor','recepcionista') AND is_active=TRUE
+          )) as total_clients,
         (SELECT COUNT(*) FROM attendance WHERE gym_id=$1 AND DATE(check_in_time)=CURRENT_DATE) as asistencias_hoy,
         (SELECT COUNT(DISTINCT ci.id) FROM class_instances ci WHERE ci.gym_id=$1 AND ci.class_date=CURRENT_DATE AND ci.status='scheduled') as clases_hoy,
         (SELECT COALESCE(SUM(amount),0) FROM payments WHERE gym_id=$1 AND status='pagado' AND DATE(created_at)=CURRENT_DATE) as pagos_dia
