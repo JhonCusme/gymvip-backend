@@ -64,7 +64,7 @@ const login = async (req, res) => {
 
     // 5. Buscar el gym
     const gymResult = await db.query(
-  'SELECT id, slug, name, logo_url, primary_color, secondary_color, theme, payphone_enabled FROM gyms WHERE slug = $1 AND is_active = TRUE',
+  'SELECT id, slug, name, logo_url, primary_color, secondary_color, theme, payphone_enabled, booking_advance_days FROM gyms WHERE slug = $1 AND is_active = TRUE',
   [gym]
 );
 
@@ -114,6 +114,7 @@ const login = async (req, res) => {
         role,
         user: { id: user.id, cedula: user.cedula, name: user.name, email: user.email, phone: user.phone, role, qrCode: user.qr_code },
         gym: { id: gymData.id, slug: gymData.slug, name: gymData.name, logoUrl: gymData.logo_url, primaryColor: gymData.primary_color, secondaryColor: gymData.secondary_color, theme: gymData.theme, payphoneEnabled: gymData.payphone_enabled || false },
+        bookingAdvanceDays: gymData.booking_advance_days ?? 7,
         redirectTo: redirectMap[role] || '/usuario/home'
       });
     }
@@ -139,7 +140,8 @@ const login = async (req, res) => {
           primaryColor: gymData.primary_color,
           secondaryColor: gymData.secondary_color,
           theme: gymData.theme,
-          payphoneEnabled: gymData.payphone_enabled || false
+          payphoneEnabled: gymData.payphone_enabled || false,
+          bookingAdvanceDays: gymData.booking_advance_days ?? 7
         }
       });
     }
@@ -179,7 +181,8 @@ const login = async (req, res) => {
         primaryColor: gymData.primary_color,
         secondaryColor: gymData.secondary_color,
         theme: gymData.theme,
-        payphoneEnabled: gymData.payphone_enabled || false
+        payphoneEnabled: gymData.payphone_enabled || false,
+        bookingAdvanceDays: gymData.booking_advance_days ?? 7
       },
       redirectTo: redirectMap[role] || '/usuario/home'
     });
