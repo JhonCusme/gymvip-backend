@@ -491,26 +491,27 @@ const getAttendance = async (req, res) => {
     if (dateTo) { params.push(dateTo); dateCondition += ` AND DATE(a.check_in_time) <= $${params.length}`; }
 
     const kpis = await db.query(`
-      SELECT COUNT(*) as total, COUNT(DISTINCT user_id) as unique_users,
-             COUNT(DISTINCT membership_id) as with_membership
-      FROM attendance WHERE gym_id=$1 ${dateCondition}
+      SELECT COUNT(*) as total, COUNT(DISTINCT a.user_id) as unique_users,
+             COUNT(DISTINCT a.membership_id) as with_membership
+      FROM attendance a WHERE a.gym_id=$1 ${dateCondition}
     `, params);
 
     const byDay = await db.query(`
-      SELECT DATE(check_in_time) as date, COUNT(*) as count
-      FROM attendance WHERE gym_id=$1 ${dateCondition}
-      GROUP BY DATE(check_in_time) ORDER BY date
+      SELECT DATE(a.check_in_time) as date, COUNT(*) as count
+      FROM attendance a WHERE a.gym_id=$1 ${dateCondition}
+      GROUP BY DATE(a.check_in_time) ORDER BY date
     `, params);
 
     const heatmap = await db.query(`
-      SELECT EXTRACT(DOW FROM check_in_time)::int as dow,
-             EXTRACT(HOUR FROM check_in_time)::int as hour, COUNT(*) as count
-      FROM attendance WHERE gym_id=$1 ${dateCondition}
+      SELECT EXTRACT(DOW FROM a.check_in_time)::int as dow,
+             EXTRACT(HOUR FROM a.check_in_time)::int as hour, COUNT(*) as count
+      FROM attendance a WHERE a.gym_id=$1 ${dateCondition}
       GROUP BY dow, hour
     `, params);
 
     res.json({ kpis: kpis.rows[0], byDay: byDay.rows, heatmap: heatmap.rows });
   } catch (err) {
+    console.error('Error getAttendance recepcion:', err.message);
     res.status(500).json({ error: 'Error interno' });
   }
 };
