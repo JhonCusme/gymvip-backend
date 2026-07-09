@@ -497,6 +497,13 @@ const getAttendance = async (req, res) => {
       FROM attendance a WHERE a.gym_id=$1 ${dateCondition}
     `, params);
 
+    const horaPico = await db.query(`
+      SELECT EXTRACT(HOUR FROM a.check_in_time AT TIME ZONE '${tz}')::text || ':00' as hora
+      FROM attendance a WHERE a.gym_id=$1 ${dateCondition}
+      GROUP BY EXTRACT(HOUR FROM a.check_in_time AT TIME ZONE '${tz}')
+      ORDER BY COUNT(*) DESC LIMIT 1
+    `, params);
+
     const byDay = await db.query(`
       SELECT DATE(a.check_in_time AT TIME ZONE '${tz}') as date, COUNT(*) as count
       FROM attendance a WHERE a.gym_id=$1 ${dateCondition}
@@ -510,7 +517,11 @@ const getAttendance = async (req, res) => {
       GROUP BY dow, hour
     `, params);
 
-    res.json({ kpis: kpis.rows[0], byDay: byDay.rows, heatmap: heatmap.rows });
+    res.json({ 
+      kpis: { ...kpis.rows[0], hora_pico: horaPico.rows[0]?.hora || '--:--' }, 
+      byDay: byDay.rows, 
+      heatmap: heatmap.rows 
+    });
   } catch (err) {
     console.error('Error getAttendance recepcion:', err.message);
     res.status(500).json({ error: 'Error interno' });
