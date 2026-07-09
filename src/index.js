@@ -32,15 +32,20 @@ app.use(cors({
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 200,
-  message: { error: 'Demasiadas solicitudes, intenta más tarde' }
+  max: 1000,
+  message: { error: 'Demasiadas solicitudes, intenta más tarde' },
+  standardHeaders: true,
+  legacyHeaders: false
 });
 app.use('/api/', limiter);
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
-  message: { error: 'Demasiados intentos de login' }
+  max: 100,
+  message: { error: 'Demasiados intentos de login, espera unos minutos' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true // no cuenta los logins exitosos, solo los fallidos
 });
 app.use('/api/auth/login', loginLimiter);
 // Rate limiting para PayPhone — más estricto
