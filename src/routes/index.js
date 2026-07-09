@@ -217,6 +217,7 @@ router.post('/recepcion/schedules/:classInstanceId/book', ...recepAuth, receptio
 router.get('/recepcion/schedules/:classInstanceId/enrolled', ...recepAuth, receptionCtrl.getEnrolled);
 router.post('/recepcion/scanner/validate', ...recepAuth, receptionCtrl.validateEntry);
 router.get('/recepcion/attendance', ...recepAuth, receptionCtrl.getAttendance);
+router.get('/recepcion/membership-types', ...recepAuth, receptionCtrl.getMembershipTypes);
 
 // ============================================================
 // USUARIO / CLIENTE

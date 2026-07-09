@@ -513,8 +513,23 @@ const getAttendance = async (req, res) => {
   }
 };
 
+// GET /api/recepcion/membership-types
+const getMembershipTypes = async (req, res) => {
+  try {
+    const result = await db.query(
+      'SELECT * FROM membership_types WHERE gym_id = $1 AND is_active = TRUE ORDER BY price ASC',
+      [req.gym.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error getMembershipTypes recepcion:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
 module.exports = {
   getDashboard, getClients, getClientDetail, createClient,
   createMembership, registerPayment, getMemberships, getPayments,
-  getSchedules, bookClient, getEnrolled, validateEntry, getAttendance
+  getSchedules, bookClient, getEnrolled, validateEntry, getAttendance,
+  getMembershipTypes
 };
