@@ -82,6 +82,9 @@ const getClients = async (req, res) => {
       ) m ON TRUE
       LEFT JOIN membership_types mt ON mt.id = m.membership_type_id
       WHERE ugr.gym_id = $1 AND ugr.role = 'user' AND ugr.is_active = TRUE
+      AND ugr.user_id NOT IN (
+        SELECT user_id FROM user_gym_roles WHERE gym_id = $1 AND role IN ('admin','instructor','recepcionista') AND is_active = TRUE
+      )
       ${searchCondition}
       ORDER BY u.name ASC
     `, params);
@@ -268,6 +271,9 @@ const getMemberships = async (req, res) => {
       JOIN membership_types mt ON mt.id = m.membership_type_id
       JOIN users u ON u.id = m.user_id
       WHERE m.gym_id = $1 ${condition}
+      AND m.user_id NOT IN (
+        SELECT user_id FROM user_gym_roles WHERE gym_id = $1 AND role IN ('admin','instructor','recepcionista') AND is_active = TRUE
+      )
       ORDER BY m.end_date DESC
     `, [gymId]);
 
