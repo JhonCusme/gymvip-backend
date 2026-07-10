@@ -266,6 +266,7 @@ const getMemberships = async (req, res) => {
     let condition = '';
     if (filter === 'active') condition = "AND m.status='active' AND m.end_date>=CURRENT_DATE";
     else if (filter === 'expired') condition = "AND (m.status='expired' OR m.end_date<CURRENT_DATE)";
+    else if (filter === 'expiring') condition = "AND m.status='active' AND m.end_date >= CURRENT_DATE AND m.end_date <= CURRENT_DATE + 5";
 
     const result = await db.query(`
       SELECT m.id, m.start_date, m.end_date, m.status, mt.name as type_name,
@@ -277,7 +278,7 @@ const getMemberships = async (req, res) => {
       AND m.user_id NOT IN (
         SELECT user_id FROM user_gym_roles WHERE gym_id = $1 AND role IN ('admin','instructor','recepcionista') AND is_active = TRUE
       )
-      ORDER BY m.end_date DESC
+      ORDER BY m.end_date ASC
     `, [gymId]);
 
     res.json(result.rows);
