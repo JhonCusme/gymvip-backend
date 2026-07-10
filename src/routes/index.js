@@ -133,6 +133,9 @@ router.post('/admin/membership-types', ...adminAuth, adminCtrl.createMembershipT
 router.put('/admin/membership-types/:typeId', ...adminAuth, adminCtrl.updateMembershipType);
 router.delete('/admin/membership-types/:typeId', ...adminAuth, adminCtrl.deleteMembershipType);
 
+// Membresías
+router.get('/admin/memberships', ...adminAuth, adminCtrl.getMemberships);
+
 // Sesiones
 router.get('/admin/sessions', ...adminAuth, adminCtrl.getSessions);
 router.post('/admin/sessions', ...adminAuth, adminCtrl.createSession);

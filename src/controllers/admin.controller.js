@@ -848,9 +848,40 @@ const validateEntry = async (req, res) => {
   }
 };
 
+// GET /api/admin/memberships — lista de membresías de clientes reales
+const getMemberships = async (req, res) => {
+  try {
+    const gymId = req.gym.id;
+    const { filter = 'all' } = req.query;
+    let condition = '';
+    if (filter === 'active') condition = "AND m.status='active' AND m.end_date>=CURRENT_DATE";
+    else if (filter === 'expired') condition = "AND (m.status='expired' OR m.end_date<CURRENT_DATE)";
+    else if (filter === 'expiring') condition = "AND m.status='active' AND m.end_date >= CURRENT_DATE AND m.end_date <= CURRENT_DATE + 5";
+
+    const result = await db.query(`
+      SELECT m.id, m.start_date, m.end_date, m.status, mt.name as type_name,
+             u.name as client_name, u.cedula as client_cedula,
+             EXISTS (SELECT 1 FROM payments p WHERE p.membership_id=m.id AND p.method NOT IN ('cortesia','beca')) as is_paid
+      FROM memberships m
+      JOIN membership_types mt ON mt.id = m.membership_type_id
+      JOIN users u ON u.id = m.user_id
+      WHERE m.gym_id = $1 ${condition}
+      AND m.user_id NOT IN (
+        SELECT user_id FROM user_gym_roles WHERE gym_id = $1 AND role IN ('admin','instructor','recepcionista') AND is_active = TRUE
+      )
+      ORDER BY m.end_date ASC
+    `, [gymId]);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error getMemberships admin:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
 module.exports = {
   getDashboard, getUsers, getUserDetail, createUser, updateUser, resetUserPassword,
-  getMembershipTypes, createMembershipType, updateMembershipType, deleteMembershipType,
+  getMembershipTypes, getMemberships, createMembershipType, updateMembershipType, deleteMembershipType,
   activateMembership, getSessions, createSession, updateSession, deleteSession,
   getSchedules, createSchedule, deleteSchedule,
   getInstructors, createInstructor, updateInstructor, deleteInstructor,
