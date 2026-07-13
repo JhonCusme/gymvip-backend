@@ -208,21 +208,29 @@ const getMyBookings = async (req, res) => {
   try {
     const result = await db.query(`
       SELECT b.id, b.status, ci.class_date, ci.start_time, ci.end_time,
-             s.name as session_name, i.name as instructor_name
+             s.name as session_name, i.name as instructor_name,
+             EXISTS (
+               SELECT 1 FROM attendance a
+               WHERE a.user_id = b.user_id 
+                 AND a.gym_id = b.gym_id
+                 AND DATE(a.check_in_time AT TIME ZONE $3) = ci.class_date
+             ) as attended
       FROM bookings b
       JOIN class_instances ci ON ci.id = b.class_instance_id
       JOIN sessions s ON s.id = ci.session_id
       LEFT JOIN instructors i ON i.id = ci.instructor_id
       WHERE b.user_id=$1 AND b.gym_id=$2
       ORDER BY ci.class_date DESC, ci.start_time DESC
-    `, [req.user.id, req.gym.id]);
+    `, [req.user.id, req.gym.id, req.gym.timezone || 'America/Guayaquil']);
 
-    const upcoming = result.rows.filter(b => b.status === 'confirmed' && new Date(b.class_date) >= new Date());
-    const past = result.rows.filter(b => new Date(b.class_date) < new Date() || b.status === 'attended');
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const upcoming = result.rows.filter(b => b.status === 'confirmed' && new Date(b.class_date) >= today);
+    const past = result.rows.filter(b => new Date(b.class_date) < today && b.status !== 'cancelled');
     const cancelled = result.rows.filter(b => b.status === 'cancelled');
 
     res.json({ upcoming, past, cancelled });
   } catch (err) {
+    console.error('Error getMyBookings:', err.message);
     res.status(500).json({ error: 'Error interno' });
   }
 };
