@@ -205,8 +205,30 @@ const getClassStudents = async (req, res) => {
 const markAttendance = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    const { attended } = req.body; // true = asistió, false = no asistió
+    const { attended } = req.body;
     const gymId = req.gym.id;
+    const tz = req.gym.timezone || 'America/Guayaquil';
+
+    // Verificar que estamos dentro de la ventana permitida (desde inicio hasta 1h después)
+    const check = await db.query(`
+      SELECT ci.class_date, ci.start_time,
+             (ci.class_date + ci.start_time) as class_start,
+             (NOW() AT TIME ZONE $2) as now_local
+      FROM bookings b
+      JOIN class_instances ci ON ci.id = b.class_instance_id
+      WHERE b.id = $1 AND b.gym_id = $3
+    `, [bookingId, tz, gymId]);
+
+    if (!check.rows.length) return res.status(404).json({ error: 'Reserva no encontrada' });
+
+    const { class_start, now_local } = check.rows[0];
+    const start = new Date(class_start);
+    const now = new Date(now_local);
+    const limit = new Date(start.getTime() + 60 * 60 * 1000);
+
+    if (now < start || now > limit) {
+      return res.status(400).json({ error: 'Solo puedes tomar asistencia durante la primera hora de la clase' });
+    }
 
     const newStatus = attended ? 'attended' : 'no_show';
 
@@ -215,8 +237,6 @@ const markAttendance = async (req, res) => {
       WHERE id = $2 AND gym_id = $3
       RETURNING id, status
     `, [newStatus, bookingId, gymId]);
-
-    if (!result.rows.length) return res.status(404).json({ error: 'Reserva no encontrada' });
 
     res.json({ message: 'Asistencia registrada', booking: result.rows[0] });
   } catch (err) {
