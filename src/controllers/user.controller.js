@@ -219,9 +219,16 @@ const getMyBookings = async (req, res) => {
     `, [req.user.id, req.gym.id]);
 
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    const upcoming = result.rows.filter(b => b.status === 'confirmed' && new Date(b.class_date) >= today);
-    const past = result.rows.filter(b => new Date(b.class_date) < today && b.status !== 'cancelled');
     const cancelled = result.rows.filter(b => b.status === 'cancelled');
+    // Próximas: confirmadas y de hoy en adelante
+    const upcoming = result.rows.filter(b => 
+      b.status === 'confirmed' && new Date(b.class_date.toISOString?.() || b.class_date) >= today
+    );
+    // Pasadas: ya marcadas por el coach (attended/no_show) o de fecha anterior
+    const past = result.rows.filter(b => 
+      b.status === 'attended' || b.status === 'no_show' ||
+      (b.status === 'confirmed' && new Date(b.class_date.toISOString?.() || b.class_date) < today)
+    );
 
     res.json({ upcoming, past, cancelled });
   } catch (err) {
