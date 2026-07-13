@@ -369,6 +369,8 @@ router.get('/instructor/routines', ...instrAuth, instrCtrl.getRoutines);
 router.post('/instructor/routines', ...instrAuth, instrCtrl.createRoutine);
 router.get('/instructor/profile', ...instrAuth, instrCtrl.getProfile);
 router.put('/instructor/profile', ...instrAuth, instrCtrl.updateProfile);
+router.get('/instructor/classes/:classInstanceId/students', ...instrAuth, instrCtrl.getClassStudents);
+router.post('/instructor/bookings/:bookingId/attendance', ...instrAuth, instrCtrl.markAttendance);
 
 // ============================================================
 // BACKUP — Super Admin

@@ -172,4 +172,57 @@ const updateProfile = async (req, res) => {
   }
 };
 
-module.exports = { getTodayClasses, getAttendanceByDate, getRoutines, createRoutine, getProfile, updateProfile };
+// GET /api/instructor/classes/:classInstanceId/students — alumnos inscritos en la clase
+const getClassStudents = async (req, res) => {
+  try {
+    const { classInstanceId } = req.params;
+    const gymId = req.gym.id;
+
+    // Verificar que la clase pertenece al gym
+    const cls = await db.query(
+      'SELECT id, class_date FROM class_instances WHERE id=$1 AND gym_id=$2',
+      [classInstanceId, gymId]
+    );
+    if (!cls.rows.length) return res.status(404).json({ error: 'Clase no encontrada' });
+
+    const students = await db.query(`
+      SELECT b.id as booking_id, b.status,
+             u.id as user_id, u.name, u.cedula, u.birth_date
+      FROM bookings b
+      JOIN users u ON u.id = b.user_id
+      WHERE b.class_instance_id = $1 AND b.status != 'cancelled'
+      ORDER BY u.name ASC
+    `, [classInstanceId]);
+
+    res.json({ classDate: cls.rows[0].class_date, students: students.rows });
+  } catch (err) {
+    console.error('Error getClassStudents:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// POST /api/instructor/bookings/:bookingId/attendance — marcar asistencia
+const markAttendance = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const { attended } = req.body; // true = asistió, false = no asistió
+    const gymId = req.gym.id;
+
+    const newStatus = attended ? 'attended' : 'no_show';
+
+    const result = await db.query(`
+      UPDATE bookings SET status = $1
+      WHERE id = $2 AND gym_id = $3
+      RETURNING id, status
+    `, [newStatus, bookingId, gymId]);
+
+    if (!result.rows.length) return res.status(404).json({ error: 'Reserva no encontrada' });
+
+    res.json({ message: 'Asistencia registrada', booking: result.rows[0] });
+  } catch (err) {
+    console.error('Error markAttendance:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+module.exports = { getTodayClasses, getAttendanceByDate, getRoutines, createRoutine, getProfile, updateProfile, getClassStudents, markAttendance };
