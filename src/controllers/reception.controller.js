@@ -203,19 +203,27 @@ const createMembership = async (req, res) => {
     if (!typeResult.rows.length) return res.status(404).json({ error: 'Plan no encontrado' });
     const mType = typeResult.rows[0];
 
-    // Usar fecha personalizada si viene, o hoy por defecto
-    const startDate = customStartDate ? new Date(customStartDate + 'T00:00:00') : new Date();
-    const endDate = new Date(startDate);
-    if (mType.duration_unit === 'days') endDate.setDate(endDate.getDate() + mType.duration_value);
-    else if (mType.duration_unit === 'weeks') endDate.setDate(endDate.getDate() + mType.duration_value * 7);
-    else if (mType.duration_unit === 'months') endDate.setMonth(endDate.getMonth() + mType.duration_value);
-    else if (mType.duration_unit === 'years') endDate.setFullYear(endDate.getFullYear() + mType.duration_value);
+    // Usar fecha personalizada si viene, o hoy por defecto (sin conversión de zona horaria)
+    let startStr;
+    if (customStartDate) {
+      startStr = customStartDate; // ya viene como YYYY-MM-DD
+    } else {
+      const now = new Date();
+      startStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    }
+    // Calcular fecha fin a partir de la fecha inicio (en UTC puro para evitar desfases)
+    const [sy, sm, sd] = startStr.split('-').map(Number);
+    const endDate = new Date(Date.UTC(sy, sm - 1, sd));
+    if (mType.duration_unit === 'days') endDate.setUTCDate(endDate.getUTCDate() + mType.duration_value);
+    else if (mType.duration_unit === 'weeks') endDate.setUTCDate(endDate.getUTCDate() + mType.duration_value * 7);
+    else if (mType.duration_unit === 'months') endDate.setUTCMonth(endDate.getUTCMonth() + mType.duration_value);
+    else if (mType.duration_unit === 'years') endDate.setUTCFullYear(endDate.getUTCFullYear() + mType.duration_value);
 
     const memResult = await db.query(`
       INSERT INTO memberships (user_id, gym_id, membership_type_id, start_date, end_date, status)
       VALUES ($1,$2,$3,$4,$5,'active') RETURNING id
     `, [userId, gymId, membershipTypeId,
-        startDate.toISOString().split('T')[0],
+        startStr,
         endDate.toISOString().split('T')[0]]);
 
     await db.query(`
