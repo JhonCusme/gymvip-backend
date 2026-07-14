@@ -283,7 +283,7 @@ if (cardToken) {
       message: '¡Pago aprobado! Tu membresía ha sido renovada.',
       membership: {
         typeName: intent.type_name,
-        startDate: startDate.toISOString().split('T')[0],
+        startDate: startStr,
         endDate: endDate.toISOString().split('T')[0]
       },
       transaction: {
