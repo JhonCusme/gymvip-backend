@@ -135,6 +135,7 @@ router.delete('/admin/membership-types/:typeId', ...adminAuth, adminCtrl.deleteM
 
 // Membresías
 router.get('/admin/memberships', ...adminAuth, adminCtrl.getMemberships);
+router.post('/admin/memberships/:membershipId/cancel', ...adminAuth, adminCtrl.cancelMembership);
 
 // Sesiones
 router.get('/admin/sessions', ...adminAuth, adminCtrl.getSessions);
@@ -221,6 +222,7 @@ router.get('/recepcion/schedules/:classInstanceId/enrolled', ...recepAuth, recep
 router.post('/recepcion/scanner/validate', ...recepAuth, receptionCtrl.validateEntry);
 router.get('/recepcion/attendance', ...recepAuth, receptionCtrl.getAttendance);
 router.get('/recepcion/membership-types', ...recepAuth, receptionCtrl.getMembershipTypes);
+router.post('/recepcion/memberships/:membershipId/cancel', ...recepAuth, receptionCtrl.cancelMembership);
 
 // ============================================================
 // USUARIO / CLIENTE

@@ -879,6 +879,85 @@ const getMemberships = async (req, res) => {
   }
 };
 
+// POST /api/admin/memberships/:membershipId/cancel — anular membresía
+const cancelMembership = async (req, res) => {
+  try {
+    const { membershipId } = req.params;
+    const { reason } = req.body;
+    const gymId = req.gym.id;
+
+    // Traer la membresía y su pago asociado
+    const memResult = await db.query(`
+      SELECT m.id, m.user_id, m.status,
+             p.id as payment_id, p.method, p.status as payment_status,
+             p.payphone_transaction_id, p.created_at as payment_date
+      FROM memberships m
+      LEFT JOIN payments p ON p.membership_id = m.id AND p.status = 'pagado'
+      WHERE m.id = $1 AND m.gym_id = $2
+    `, [membershipId, gymId]);
+
+    if (!memResult.rows.length) return res.status(404).json({ error: 'Membresía no encontrada' });
+    const mem = memResult.rows[0];
+
+    if (mem.status === 'cancelled') {
+      return res.status(400).json({ error: 'Esta membresía ya está anulada' });
+    }
+
+    let refundInfo = null;
+
+    // Si fue pagada con PayPhone, intentar el reverso
+    if (mem.method === 'payphone' && mem.payphone_transaction_id) {
+      const gymCfg = await db.query(
+        'SELECT payphone_token FROM gyms WHERE id = $1',
+        [gymId]
+      );
+      const token = gymCfg.rows[0]?.payphone_token;
+
+      if (!token) {
+        return res.status(400).json({ error: 'No hay credenciales de PayPhone configuradas' });
+      }
+
+      try {
+        const axios = require('axios');
+        const reverseRes = await axios.post(
+          'https://pay.payphonetodoesposible.com/api/Reverse',
+          { id: parseInt(mem.payphone_transaction_id) },
+          { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } }
+        );
+        refundInfo = { success: true, data: reverseRes.data };
+      } catch (payErr) {
+        const msg = payErr.response?.data?.message || 'No se pudo reversar el pago en PayPhone';
+        return res.status(400).json({ 
+          error: `${msg}. Recuerda que los reversos solo se permiten el mismo día hasta las 20:00. Si ya pasó el plazo, gestiona el reembolso manualmente desde PayPhone Business.` 
+        });
+      }
+    }
+
+    // Anular la membresía
+    await db.query(
+      "UPDATE memberships SET status = 'cancelled', auto_renew = FALSE WHERE id = $1",
+      [membershipId]
+    );
+
+    // Anular el pago asociado
+    if (mem.payment_id) {
+      await db.query(
+        "UPDATE payments SET status = 'anulado' WHERE id = $1",
+        [mem.payment_id]
+      );
+    }
+
+    res.json({ 
+      message: 'Membresía anulada exitosamente', 
+      refunded: !!refundInfo,
+      refundInfo 
+    });
+  } catch (err) {
+    console.error('Error cancelMembership:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
 module.exports = {
   getDashboard, getUsers, getUserDetail, createUser, updateUser, resetUserPassword,
   getMembershipTypes, getMemberships, createMembershipType, updateMembershipType, deleteMembershipType,

@@ -561,9 +561,66 @@ const getMembershipTypes = async (req, res) => {
   }
 };
 
+// POST /api/recepcion/memberships/:membershipId/cancel — anular membresía (solo las que ella creó hoy, sin PayPhone)
+const cancelMembership = async (req, res) => {
+  try {
+    const { membershipId } = req.params;
+    const gymId = req.gym.id;
+    const receptionistId = req.user.id;
+
+    const memResult = await db.query(`
+      SELECT m.id, m.user_id, m.status, m.created_at,
+             p.id as payment_id, p.method, p.registered_by, p.created_at as payment_date
+      FROM memberships m
+      LEFT JOIN payments p ON p.membership_id = m.id AND p.status = 'pagado'
+      WHERE m.id = $1 AND m.gym_id = $2
+    `, [membershipId, gymId]);
+
+    if (!memResult.rows.length) return res.status(404).json({ error: 'Membresía no encontrada' });
+    const mem = memResult.rows[0];
+
+    if (mem.status === 'cancelled') {
+      return res.status(400).json({ error: 'Esta membresía ya está anulada' });
+    }
+
+    // No puede anular pagos de PayPhone
+    if (mem.method === 'payphone') {
+      return res.status(403).json({ error: 'No puedes anular membresías pagadas con PayPhone. Solicítalo al administrador.' });
+    }
+
+    // Solo puede anular las que ella misma registró
+    if (mem.registered_by && mem.registered_by !== receptionistId) {
+      return res.status(403).json({ error: 'Solo puedes anular membresías que tú registraste. Solicítalo al administrador.' });
+    }
+
+    // Solo el mismo día
+    const created = new Date(mem.payment_date || mem.created_at);
+    const today = new Date();
+    const sameDay = created.toDateString() === today.toDateString();
+    if (!sameDay) {
+      return res.status(403).json({ error: 'Solo puedes anular membresías creadas hoy. Solicítalo al administrador.' });
+    }
+
+    await db.query("UPDATE memberships SET status = 'cancelled', auto_renew = FALSE WHERE id = $1", [membershipId]);
+    if (mem.payment_id) {
+      await db.query("UPDATE payments SET status = 'anulado' WHERE id = $1", [mem.payment_id]);
+    }
+
+    await db.query(
+      "INSERT INTO receptionists_audit (gym_id, receptionist_id, action, target_user_id) VALUES ($1,$2,'Membresía anulada',$3)",
+      [gymId, receptionistId, mem.user_id]
+    );
+
+    res.json({ message: 'Membresía anulada exitosamente' });
+  } catch (err) {
+    console.error('Error cancelMembership recepcion:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
 module.exports = {
   getDashboard, getClients, getClientDetail, createClient,
   createMembership, registerPayment, getMemberships, getPayments,
   getSchedules, bookClient, getEnrolled, validateEntry, getAttendance,
-  getMembershipTypes
+  getMembershipTypes, cancelMembership
 };
