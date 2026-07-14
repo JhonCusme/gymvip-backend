@@ -151,6 +151,24 @@ const bookClass = async (req, res) => {
       return res.status(400).json({ error: 'Necesitas una membresía activa para reservar clases' });
     }
 
+    // Verificar que la clase no haya pasado
+    const clsCheck = await db.query(`
+      SELECT ci.class_date, ci.start_time,
+             (ci.class_date + ci.start_time) as class_start,
+             (NOW() AT TIME ZONE $2) as now_local
+      FROM class_instances ci
+      WHERE ci.id = $1 AND ci.gym_id = $3
+    `, [classInstanceId, req.gym.timezone || 'America/Guayaquil', gymId]);
+
+    if (!clsCheck.rows.length) return res.status(404).json({ error: 'Clase no encontrada' });
+
+    const classStart = new Date(clsCheck.rows[0].class_start);
+    const nowLocal = new Date(clsCheck.rows[0].now_local);
+
+    if (nowLocal > classStart) {
+      return res.status(400).json({ error: 'No puedes reservar una clase que ya comenzó' });
+    }
+
     // Verificar capacidad
     const classResult = await db.query(`
       SELECT ci.max_capacity, ci.class_date, ci.start_time,
