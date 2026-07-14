@@ -960,7 +960,7 @@ const cancelMembership = async (req, res) => {
 
 module.exports = {
   getDashboard, getUsers, getUserDetail, createUser, updateUser, resetUserPassword,
-  getMembershipTypes, getMemberships, createMembershipType, updateMembershipType, deleteMembershipType,
+  getMembershipTypes, getMemberships, cancelMembership, createMembershipType, updateMembershipType, deleteMembershipType,
   activateMembership, getSessions, createSession, updateSession, deleteSession,
   getSchedules, createSchedule, deleteSchedule,
   getInstructors, createInstructor, updateInstructor, deleteInstructor,
