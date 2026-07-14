@@ -202,15 +202,21 @@ const confirmPayment = async (req, res) => {
       });
     }
 
-    // PAGO APROBADO — Activar membresía
-    const startDate = new Date();
-    const endDate = new Date();
+    // PAGO APROBADO — Activar membresía (fecha según timezone del gym)
+    const tz = req.gym?.timezone || 'America/Guayaquil';
+    const tzDate = await db.query(`SELECT (NOW() AT TIME ZONE $1)::date as today`, [tz]);
+    const todayStr = tzDate.rows[0].today.toISOString().split('T')[0];
+
+    const [ty, tm, td] = todayStr.split('-').map(Number);
+    const endDate = new Date(Date.UTC(ty, tm - 1, td));
     const { duration_value, duration_unit } = intent;
 
-    if (duration_unit === 'days') endDate.setDate(endDate.getDate() + duration_value);
-    else if (duration_unit === 'weeks') endDate.setDate(endDate.getDate() + duration_value * 7);
-    else if (duration_unit === 'months') endDate.setMonth(endDate.getMonth() + duration_value);
-    else if (duration_unit === 'years') endDate.setFullYear(endDate.getFullYear() + duration_value);
+    if (duration_unit === 'days') endDate.setUTCDate(endDate.getUTCDate() + duration_value);
+    else if (duration_unit === 'weeks') endDate.setUTCDate(endDate.getUTCDate() + duration_value * 7);
+    else if (duration_unit === 'months') endDate.setUTCMonth(endDate.getUTCMonth() + duration_value);
+    else if (duration_unit === 'years') endDate.setUTCFullYear(endDate.getUTCFullYear() + duration_value);
+
+    const startStr = todayStr;
 
     // Crear membresía
    // Verificar si el usuario tiene consentimiento firmado para auto_renew
@@ -230,7 +236,7 @@ const memResult = await db.query(`
   RETURNING id
 `, [
   intent.user_id, intent.gym_id, intent.membership_type_id,
-  startDate.toISOString().split('T')[0],
+  startStr,
   endDate.toISOString().split('T')[0],
   autoRenew
 ]);
