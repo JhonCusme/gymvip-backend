@@ -940,9 +940,10 @@ const cancelMembership = async (req, res) => {
         );
         refundInfo = { success: true, data: reverseRes.data };
       } catch (payErr) {
-        const msg = payErr.response?.data?.message || 'No se pudo reversar el pago en PayPhone';
+        console.error('Error reverso PayPhone:', JSON.stringify(payErr.response?.data || payErr.message));
+        const msg = payErr.response?.data?.message || payErr.response?.data?.errors?.[0]?.message || 'No se pudo reversar el pago en PayPhone';
         return res.status(400).json({ 
-          error: `${msg}. Recuerda que los reversos solo se permiten el mismo día hasta las 20:00. Si ya pasó el plazo, gestiona el reembolso manualmente desde PayPhone Business.` 
+          error: `${msg}. Los reversos solo se permiten el mismo día hasta las 20:00. Si ya pasó el plazo, gestiona el reembolso manualmente desde PayPhone Business.` 
         });
       }
     }
