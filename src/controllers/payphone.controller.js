@@ -202,6 +202,22 @@ const confirmPayment = async (req, res) => {
       });
     }
 
+    // Idempotencia: si este pago ya fue procesado, no duplicar
+const existingPayment = await db.query(
+  `SELECT m.id as membership_id FROM payments p
+   JOIN memberships m ON m.id = p.membership_id
+   WHERE p.payphone_transaction_id = $1 LIMIT 1`,
+  [payphoneData.transactionId?.toString()]
+);
+
+if (existingPayment.rows.length) {
+  return res.json({
+    success: true,
+    message: 'Este pago ya fue procesado anteriormente.',
+    alreadyProcessed: true
+  });
+}
+
     // PAGO APROBADO — Activar membresía (fecha según timezone del gym)
     const tz = req.gym?.timezone || 'America/Guayaquil';
     const tzDate = await db.query(`SELECT (NOW() AT TIME ZONE $1)::date as today`, [tz]);
@@ -229,6 +245,12 @@ const userConsent = await db.query(
    const cardToken = req.body.ctoken || payphoneData.cardToken || payphoneData.ctoken;
 
 const autoRenew = userConsent.rows[0]?.payphone_consent_signed && !!cardToken;
+
+// Expirar membresías activas anteriores del usuario (evita duplicados activos)
+await db.query(`
+  UPDATE memberships SET status = 'expired'
+  WHERE user_id = $1 AND gym_id = $2 AND status = 'active'
+`, [intent.user_id, intent.gym_id]);
 
 const memResult = await db.query(`
   INSERT INTO memberships (user_id, gym_id, membership_type_id, start_date, end_date, status, auto_renew)
