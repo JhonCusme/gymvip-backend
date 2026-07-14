@@ -194,7 +194,7 @@ const createMembership = async (req, res) => {
   try {
     const { userId } = req.params;
     const gymId = req.gym.id;
-    const { membershipTypeId, method } = req.body;
+    const { membershipTypeId, method, startDate: customStartDate } = req.body;
 
     const typeResult = await db.query(
       'SELECT * FROM membership_types WHERE id = $1 AND gym_id = $2 AND is_active = TRUE',
@@ -203,8 +203,9 @@ const createMembership = async (req, res) => {
     if (!typeResult.rows.length) return res.status(404).json({ error: 'Plan no encontrado' });
     const mType = typeResult.rows[0];
 
-    const startDate = new Date();
-    const endDate = new Date();
+    // Usar fecha personalizada si viene, o hoy por defecto
+    const startDate = customStartDate ? new Date(customStartDate + 'T00:00:00') : new Date();
+    const endDate = new Date(startDate);
     if (mType.duration_unit === 'days') endDate.setDate(endDate.getDate() + mType.duration_value);
     else if (mType.duration_unit === 'weeks') endDate.setDate(endDate.getDate() + mType.duration_value * 7);
     else if (mType.duration_unit === 'months') endDate.setMonth(endDate.getMonth() + mType.duration_value);
