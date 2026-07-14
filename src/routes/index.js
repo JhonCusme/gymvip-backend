@@ -126,6 +126,7 @@ router.get('/admin/users/:userId', ...adminAuth, adminCtrl.getUserDetail);
 router.put('/admin/users/:userId', ...adminAuth, adminCtrl.updateUser);
 router.post('/admin/users/:userId/reset-password', ...adminAuth, adminCtrl.resetUserPassword);
 router.post('/admin/users/:userId/activate-membership', ...adminAuth, adminCtrl.activateMembership);
+router.get('/admin/users/:userId/memberships-history', ...adminAuth, adminCtrl.getUserMembershipsHistory);
 
 // Tipos de membresía
 router.get('/admin/membership-types', ...adminAuth, adminCtrl.getMembershipTypes);

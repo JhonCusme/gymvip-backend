@@ -848,31 +848,45 @@ const validateEntry = async (req, res) => {
   }
 };
 
-// GET /api/admin/memberships — lista de membresías de clientes reales
+// GET /api/admin/memberships — solo la membresía más reciente de cada cliente
 const getMemberships = async (req, res) => {
   try {
     const gymId = req.gym.id;
     const { filter = 'all' } = req.query;
     let condition = '';
     if (filter === 'active') condition = "AND m.status='active' AND m.end_date>=CURRENT_DATE";
-    else if (filter === 'expired') condition = "AND (m.status='expired' OR m.end_date<CURRENT_DATE)";
+    else if (filter === 'expired') condition = "AND (m.status='expired' OR (m.status='active' AND m.end_date<CURRENT_DATE))";
     else if (filter === 'expiring') condition = "AND m.status='active' AND m.end_date >= CURRENT_DATE AND m.end_date <= CURRENT_DATE + 5";
+    else if (filter === 'cancelled') condition = "AND m.status='cancelled'";
 
     const result = await db.query(`
-      SELECT m.id, m.start_date, m.end_date, m.status, mt.name as type_name,
-             u.name as client_name, u.cedula as client_cedula,
-             EXISTS (SELECT 1 FROM payments p WHERE p.membership_id=m.id AND p.method NOT IN ('cortesia','beca')) as is_paid
+      SELECT DISTINCT ON (m.user_id)
+             m.id, m.start_date, m.end_date, m.status, m.created_at,
+             mt.name as type_name,
+             u.id as user_id, u.name as client_name, u.cedula as client_cedula,
+             p.method as payment_method,
+             p.registered_by,
+             (p.registered_by IS NOT NULL) as by_staff
       FROM memberships m
       JOIN membership_types mt ON mt.id = m.membership_type_id
       JOIN users u ON u.id = m.user_id
+      LEFT JOIN LATERAL (
+        SELECT p2.method, p2.registered_by
+        FROM payments p2
+        WHERE p2.membership_id = m.id AND p2.status = 'pagado'
+        ORDER BY p2.created_at DESC LIMIT 1
+      ) p ON TRUE
       WHERE m.gym_id = $1 ${condition}
       AND m.user_id NOT IN (
         SELECT user_id FROM user_gym_roles WHERE gym_id = $1 AND role IN ('admin','instructor','recepcionista') AND is_active = TRUE
       )
-      ORDER BY m.end_date ASC
+      ORDER BY m.user_id, m.created_at DESC
     `, [gymId]);
 
-    res.json(result.rows);
+    // Ordenar por fecha de vencimiento (más próximas primero)
+    const sorted = result.rows.sort((a, b) => new Date(a.end_date) - new Date(b.end_date));
+
+    res.json(sorted);
   } catch (err) {
     console.error('Error getMemberships admin:', err.message);
     res.status(500).json({ error: 'Error interno' });
@@ -958,6 +972,38 @@ const cancelMembership = async (req, res) => {
   }
 };
 
+// GET /api/admin/users/:userId/memberships-history — historial completo de membresías de un cliente
+const getUserMembershipsHistory = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const gymId = req.gym.id;
+
+    const result = await db.query(`
+      SELECT m.id, m.start_date, m.end_date, m.status, m.created_at,
+             mt.name as type_name, mt.price,
+             p.method as payment_method, p.amount, p.registered_by,
+             (p.registered_by IS NOT NULL) as by_staff,
+             reg.name as registered_by_name
+      FROM memberships m
+      JOIN membership_types mt ON mt.id = m.membership_type_id
+      LEFT JOIN LATERAL (
+        SELECT p2.method, p2.amount, p2.registered_by
+        FROM payments p2
+        WHERE p2.membership_id = m.id
+        ORDER BY p2.created_at DESC LIMIT 1
+      ) p ON TRUE
+      LEFT JOIN users reg ON reg.id = p.registered_by
+      WHERE m.user_id = $1 AND m.gym_id = $2
+      ORDER BY m.created_at DESC
+    `, [userId, gymId]);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error getUserMembershipsHistory:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
 module.exports = {
   getDashboard, getUsers, getUserDetail, createUser, updateUser, resetUserPassword,
   getMembershipTypes, getMemberships, cancelMembership, createMembershipType, updateMembershipType, deleteMembershipType,
@@ -965,5 +1011,5 @@ module.exports = {
   getSchedules, createSchedule, deleteSchedule,
   getInstructors, createInstructor, updateInstructor, deleteInstructor,
   getReceptionists, createReceptionist,
-  getPayments, getReports, getReceptionAudit, getAttendanceHistory, validateEntry
+  getPayments, getReports, getReceptionAudit, getAttendanceHistory, validateEntry,getUserMembershipsHistory
 };
