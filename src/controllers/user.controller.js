@@ -186,15 +186,26 @@ const bookClass = async (req, res) => {
       return res.status(400).json({ error: 'La clase ya no tiene lugares disponibles' });
     }
 
-    // Verificar que no esté ya reservada
+    // Verificar si ya existe una reserva para esta clase (en cualquier estado)
     const existing = await db.query(
-      "SELECT id FROM bookings WHERE user_id=$1 AND class_instance_id=$2 AND status='confirmed'",
+      "SELECT id, status FROM bookings WHERE user_id=$1 AND class_instance_id=$2",
       [userId, classInstanceId]
     );
+
     if (existing.rows.length) {
-      return res.status(400).json({ error: 'Ya tienes una reserva para esta clase' });
+      const existingBooking = existing.rows[0];
+      if (existingBooking.status === 'confirmed') {
+        return res.status(400).json({ error: 'Ya tienes una reserva para esta clase' });
+      }
+      // Si existe pero está cancelada/no_show, reactivarla
+      await db.query(
+        "UPDATE bookings SET status='confirmed', updated_at=NOW() WHERE id=$1",
+        [existingBooking.id]
+      );
+      return res.status(200).json({ message: 'Clase reservada exitosamente' });
     }
 
+    // No existe reserva previa, crear nueva
     await db.query(`
       INSERT INTO bookings (gym_id, user_id, class_instance_id, status, booked_by, booked_by_role)
       VALUES ($1,$2,$3,'confirmed',$2,'user')
