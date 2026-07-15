@@ -598,11 +598,50 @@ const cancelAutoRenew = async (req, res) => {
   }
 };
 
+// POST /api/usuario/bookings/:bookingId/cancel — cancelar una reserva
+const cancelBooking = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const userId = req.user.id;
+    const gymId = req.gym.id;
+
+    // Verificar que la reserva es del usuario y traer la fecha/hora de la clase
+    const booking = await db.query(`
+      SELECT b.id, b.status, ci.class_date, ci.start_time,
+             (ci.class_date + ci.start_time) as class_start,
+             (NOW() AT TIME ZONE $3) as now_local
+      FROM bookings b
+      JOIN class_instances ci ON ci.id = b.class_instance_id
+      WHERE b.id = $1 AND b.user_id = $2 AND b.gym_id = $4
+    `, [bookingId, userId, req.gym.timezone || 'America/Guayaquil', gymId]);
+
+    if (!booking.rows.length) return res.status(404).json({ error: 'Reserva no encontrada' });
+    const b = booking.rows[0];
+
+    if (b.status === 'cancelled') return res.status(400).json({ error: 'Esta reserva ya está cancelada' });
+    if (b.status === 'attended' || b.status === 'no_show') {
+      return res.status(400).json({ error: 'No puedes cancelar una clase que ya pasó' });
+    }
+
+    // No permitir cancelar si la clase ya comenzó
+    if (new Date(b.now_local) >= new Date(b.class_start)) {
+      return res.status(400).json({ error: 'No puedes cancelar una clase que ya comenzó' });
+    }
+
+    await db.query("UPDATE bookings SET status = 'cancelled' WHERE id = $1", [bookingId]);
+
+    res.json({ message: 'Reserva cancelada exitosamente' });
+  } catch (err) {
+    console.error('Error cancelBooking:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
 module.exports = {
   getHome, getSchedule, bookClass, cancelBooking, getMyBookings,
   getMyQR, getProfile, updateProfile, getPaymentHistory,
   getNotifications, getMembershipPlans,
   initiatePayphonePayment, signAutoChargeConsent,
   getAutoChargeStatus, cancelAutoCharge,
-  getTodayWod, paymentResult, cancelAutoRenew
+  getTodayWod, paymentResult, cancelAutoRenew, cancelBooking
 };
