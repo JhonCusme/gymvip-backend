@@ -219,6 +219,12 @@ const createMembership = async (req, res) => {
     else if (mType.duration_unit === 'months') endDate.setUTCMonth(endDate.getUTCMonth() + mType.duration_value);
     else if (mType.duration_unit === 'years') endDate.setUTCFullYear(endDate.getUTCFullYear() + mType.duration_value);
 
+// Expirar membresías activas anteriores del usuario
+    await db.query(`
+      UPDATE memberships SET status = 'expired'
+      WHERE user_id = $1 AND gym_id = $2 AND status = 'active'
+    `, [userId, gymId]);
+
     const memResult = await db.query(`
       INSERT INTO memberships (user_id, gym_id, membership_type_id, start_date, end_date, status)
       VALUES ($1,$2,$3,$4,$5,'active') RETURNING id
