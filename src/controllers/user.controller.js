@@ -207,19 +207,6 @@ const bookClass = async (req, res) => {
   }
 };
 
-// DELETE /api/usuario/bookings/:bookingId — cancelar reserva
-const cancelBooking = async (req, res) => {
-  try {
-    const { bookingId } = req.params;
-    await db.query(
-      "UPDATE bookings SET status='cancelled', updated_at=NOW() WHERE id=$1 AND user_id=$2",
-      [bookingId, req.user.id]
-    );
-    res.json({ message: 'Reserva cancelada' });
-  } catch (err) {
-    res.status(500).json({ error: 'Error interno' });
-  }
-};
 
 // GET /api/usuario/bookings — mis reservas
 const getMyBookings = async (req, res) => {
@@ -643,5 +630,5 @@ module.exports = {
   getNotifications, getMembershipPlans,
   initiatePayphonePayment, signAutoChargeConsent,
   getAutoChargeStatus, cancelAutoCharge,
-  getTodayWod, paymentResult, cancelAutoRenew, cancelBooking
+  getTodayWod, paymentResult, cancelAutoRenew
 };

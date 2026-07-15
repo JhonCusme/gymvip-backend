@@ -233,7 +233,6 @@ const userAuth = [authenticate, loadGym, requireRole('user', 'admin', 'super_adm
 router.get('/usuario/home', ...userAuth, userCtrl.getHome);
 router.get('/usuario/schedule', ...userAuth, userCtrl.getSchedule);
 router.post('/usuario/schedule/:classInstanceId/book', ...userAuth, userCtrl.bookClass);
-router.delete('/usuario/bookings/:bookingId', ...userAuth, userCtrl.cancelBooking);
 router.get('/usuario/bookings', ...userAuth, userCtrl.getMyBookings);
 router.get('/usuario/qr', ...userAuth, userCtrl.getMyQR);
 router.get('/usuario/profile', ...userAuth, userCtrl.getProfile);
