@@ -287,7 +287,7 @@ const getMemberships = async (req, res) => {
     const result = await db.query(`
       SELECT DISTINCT ON (m.user_id)
              m.id, m.start_date, m.end_date, m.status, mt.name as type_name,
-             u.name as client_name, u.cedula as client_cedula,
+             u.id as user_id, u.name as client_name, u.cedula as client_cedula,
              p.method as payment_method,
              (p.registered_by IS NOT NULL) as by_staff
       FROM memberships m
@@ -636,9 +636,41 @@ const cancelMembership = async (req, res) => {
   }
 };
 
+// GET /api/recepcion/users/:userId/memberships-history
+const getUserMembershipsHistory = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const gymId = req.gym.id;
+
+    const result = await db.query(`
+      SELECT m.id, m.start_date, m.end_date, m.status, m.created_at,
+             mt.name as type_name,
+             p.method as payment_method, p.amount, p.registered_by,
+             (p.registered_by IS NOT NULL) as by_staff,
+             reg.name as registered_by_name
+      FROM memberships m
+      JOIN membership_types mt ON mt.id = m.membership_type_id
+      LEFT JOIN LATERAL (
+        SELECT p2.method, p2.amount, p2.registered_by
+        FROM payments p2
+        WHERE p2.membership_id = m.id
+        ORDER BY p2.created_at DESC LIMIT 1
+      ) p ON TRUE
+      LEFT JOIN users reg ON reg.id = p.registered_by
+      WHERE m.user_id = $1 AND m.gym_id = $2
+      ORDER BY m.created_at DESC
+    `, [userId, gymId]);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error getUserMembershipsHistory recepcion:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
 module.exports = {
   getDashboard, getClients, getClientDetail, createClient,
   createMembership, registerPayment, getMemberships, getPayments,
   getSchedules, bookClient, getEnrolled, validateEntry, getAttendance,
-  getMembershipTypes, cancelMembership
+  getMembershipTypes, cancelMembership, getUserMembershipsHistory
 };

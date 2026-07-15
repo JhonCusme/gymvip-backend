@@ -224,6 +224,7 @@ router.post('/recepcion/scanner/validate', ...recepAuth, receptionCtrl.validateE
 router.get('/recepcion/attendance', ...recepAuth, receptionCtrl.getAttendance);
 router.get('/recepcion/membership-types', ...recepAuth, receptionCtrl.getMembershipTypes);
 router.post('/recepcion/memberships/:membershipId/cancel', ...recepAuth, receptionCtrl.cancelMembership);
+router.get('/recepcion/users/:userId/memberships-history', ...recepAuth, receptionCtrl.getUserMembershipsHistory);
 
 // ============================================================
 // USUARIO / CLIENTE
