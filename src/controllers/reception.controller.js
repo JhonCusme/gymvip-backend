@@ -280,24 +280,36 @@ const getMemberships = async (req, res) => {
     const { filter = 'all' } = req.query;
     let condition = '';
     if (filter === 'active') condition = "AND m.status='active' AND m.end_date>=CURRENT_DATE";
-    else if (filter === 'expired') condition = "AND (m.status='expired' OR m.end_date<CURRENT_DATE)";
+    else if (filter === 'expired') condition = "AND (m.status='expired' OR (m.status='active' AND m.end_date<CURRENT_DATE))";
     else if (filter === 'expiring') condition = "AND m.status='active' AND m.end_date >= CURRENT_DATE AND m.end_date <= CURRENT_DATE + 5";
+    else if (filter === 'cancelled') condition = "AND m.status='cancelled'";
 
     const result = await db.query(`
-      SELECT m.id, m.start_date, m.end_date, m.status, mt.name as type_name,
-             u.name as client_name, u.cedula as client_cedula
+      SELECT DISTINCT ON (m.user_id)
+             m.id, m.start_date, m.end_date, m.status, mt.name as type_name,
+             u.name as client_name, u.cedula as client_cedula,
+             p.method as payment_method,
+             (p.registered_by IS NOT NULL) as by_staff
       FROM memberships m
       JOIN membership_types mt ON mt.id = m.membership_type_id
       JOIN users u ON u.id = m.user_id
+      LEFT JOIN LATERAL (
+        SELECT p2.method, p2.registered_by
+        FROM payments p2
+        WHERE p2.membership_id = m.id AND p2.status = 'pagado'
+        ORDER BY p2.created_at DESC LIMIT 1
+      ) p ON TRUE
       WHERE m.gym_id = $1 ${condition}
       AND m.user_id NOT IN (
         SELECT user_id FROM user_gym_roles WHERE gym_id = $1 AND role IN ('admin','instructor','recepcionista') AND is_active = TRUE
       )
-      ORDER BY m.end_date ASC
+      ORDER BY m.user_id, m.created_at DESC
     `, [gymId]);
 
-    res.json(result.rows);
+    const sorted = result.rows.sort((a, b) => new Date(a.end_date) - new Date(b.end_date));
+    res.json(sorted);
   } catch (err) {
+    console.error('Error getMemberships recepcion:', err.message);
     res.status(500).json({ error: 'Error interno' });
   }
 };
