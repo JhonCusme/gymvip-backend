@@ -242,6 +242,7 @@ router.get('/usuario/payment-history', ...userAuth, userCtrl.getPaymentHistory);
 router.get('/usuario/notifications', ...userAuth, userCtrl.getNotifications);
 router.get('/usuario/membership-plans', ...userAuth, userCtrl.getMembershipPlans);
 router.get('/usuario/wod', ...userAuth, userCtrl.getTodayWod);
+router.post('/usuario/cancel-auto-renew', ...userAuth, userCtrl.cancelAutoRenew);
 
 // PayPhone — Cajita de Pagos (flujo correcto según documentación oficial)
 router.get('/usuario/payphone/init', ...userAuth, payphoneCtrl.initPayment);

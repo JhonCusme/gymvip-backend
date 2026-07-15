@@ -568,11 +568,41 @@ const paymentResult = async (req, res) => {
   }
 };
 
+// POST /api/usuario/cancel-auto-renew — cancelar débito recurrente
+const cancelAutoRenew = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const gymId = req.gym.id;
+
+    // Desactivar auto_renew en la membresía activa
+    const result = await db.query(`
+      UPDATE memberships SET auto_renew = FALSE
+      WHERE user_id = $1 AND gym_id = $2 AND status = 'active' AND auto_renew = TRUE
+      RETURNING id
+    `, [userId, gymId]);
+
+    if (!result.rows.length) {
+      return res.status(400).json({ error: 'No tienes un cobro automático activo' });
+    }
+
+    // Notificación de confirmación
+    await db.query(`
+      INSERT INTO notifications (user_id, gym_id, title, message, type)
+      VALUES ($1, $2, 'Cobro automático cancelado', $3, 'payment')
+    `, [userId, gymId, 'Has cancelado tu renovación automática. Tu membresía actual sigue activa hasta su fecha de vencimiento, pero no se renovará automáticamente.']);
+
+    res.json({ message: 'Cobro automático cancelado exitosamente' });
+  } catch (err) {
+    console.error('Error cancelAutoRenew:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
 module.exports = {
   getHome, getSchedule, bookClass, cancelBooking, getMyBookings,
   getMyQR, getProfile, updateProfile, getPaymentHistory,
   getNotifications, getMembershipPlans,
   initiatePayphonePayment, signAutoChargeConsent,
   getAutoChargeStatus, cancelAutoCharge,
-  getTodayWod, paymentResult
+  getTodayWod, paymentResult, cancelAutoRenew
 };
