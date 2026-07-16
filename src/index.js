@@ -20,12 +20,23 @@ const PORT = process.env.PORT || 3001;
 // SEGURIDAD
 // ============================================================
 app.use(helmet());
+const cors = require('cors');
+
+// Lista de orígenes permitidos
+const allowedOrigins = [
+  'https://gymvip-frontend.vercel.app',  // ← CAMBIAR luego por tu dominio real de producción
+  process.env.FRONTEND_URL                // dominio desde variable de entorno
+].filter(Boolean);
+
 app.use(cors({
-  origin: [
-    process.env.FRONTEND_URL || 'http://localhost:5173',
-    /\.vercel\.app$/,
-    /gymvip/
-  ],
+  origin: function (origin, callback) {
+    // Permitir peticiones sin origin (apps móviles, Postman, health checks)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error('No permitido por CORS'));
+  },
   credentials: true
 }));
 
