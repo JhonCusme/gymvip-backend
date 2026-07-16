@@ -155,6 +155,7 @@ router.get('/admin/attendance/classes/:classInstanceId/students', ...adminAuth, 
 router.post('/admin/attendance/bookings/:bookingId', ...adminAuth, adminCtrl.correctAttendance);
 router.post('/admin/classes/:classInstanceId/cancel', ...adminAuth, adminCtrl.cancelClass);
 router.post('/admin/classes/cancel-day', ...adminAuth, adminCtrl.cancelDay);
+router.post('/admin/schedules/:classInstanceId/book', ...adminAuth, adminCtrl.bookStudent);
 
 // Instructores
 router.get('/admin/instructors', ...adminAuth, adminCtrl.getInstructors);

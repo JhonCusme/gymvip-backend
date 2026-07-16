@@ -1175,6 +1175,56 @@ const cancelDay = async (req, res) => {
   }
 };
 
+// POST /api/admin/schedules/:classInstanceId/book — inscribir alumno a una clase
+const bookStudent = async (req, res) => {
+  try {
+    const { classInstanceId } = req.params;
+    const gymId = req.gym.id;
+    const { userId } = req.body;
+
+    if (!userId) return res.status(400).json({ error: 'Selecciona un alumno' });
+
+    // Verificar capacidad
+    const classResult = await db.query(`
+      SELECT ci.max_capacity, COUNT(b.id) FILTER (WHERE b.status='confirmed') as booked
+      FROM class_instances ci
+      LEFT JOIN bookings b ON b.class_instance_id = ci.id
+      WHERE ci.id = $1 AND ci.gym_id = $2
+      GROUP BY ci.id
+    `, [classInstanceId, gymId]);
+
+    if (!classResult.rows.length) return res.status(404).json({ error: 'Clase no encontrada' });
+    const cls = classResult.rows[0];
+
+    if (parseInt(cls.booked) >= cls.max_capacity) {
+      return res.status(400).json({ error: 'La clase está llena' });
+    }
+
+    // Verificar membresía activa
+    const memResult = await db.query(`
+      SELECT id FROM memberships
+      WHERE user_id=$1 AND gym_id=$2 AND status='active' AND end_date>=CURRENT_DATE
+      LIMIT 1
+    `, [userId, gymId]);
+
+    if (!memResult.rows.length) {
+      return res.status(400).json({ error: 'El alumno no tiene membresía activa' });
+    }
+
+    // Crear/reactivar reserva
+    await db.query(`
+      INSERT INTO bookings (gym_id, user_id, class_instance_id, status, booked_by, booked_by_role)
+      VALUES ($1,$2,$3,'confirmed',$4,'admin')
+      ON CONFLICT (user_id, class_instance_id) DO UPDATE SET status='confirmed'
+    `, [gymId, userId, classInstanceId, req.user.id]);
+
+    res.status(201).json({ message: 'Alumno inscrito exitosamente' });
+  } catch (err) {
+    console.error('Error bookStudent:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
 module.exports = {
   getDashboard, getUsers, getUserDetail, createUser, updateUser, resetUserPassword,
   getMembershipTypes, getMemberships, cancelMembership, createMembershipType, updateMembershipType, deleteMembershipType,
@@ -1183,5 +1233,5 @@ module.exports = {
   getInstructors, createInstructor, updateInstructor, deleteInstructor,
   getReceptionists, createReceptionist,
   getPayments, getReports, getReceptionAudit, getAttendanceHistory, validateEntry,getUserMembershipsHistory, getAttendanceClasses,
-   getAttendanceStudents, correctAttendance, cancelClass, cancelDay
+   getAttendanceStudents, correctAttendance, cancelClass, cancelDay, bookStudent
 };
