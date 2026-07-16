@@ -1020,7 +1020,7 @@ const getAttendanceClasses = async (req, res) => {
     if (!date) return res.status(400).json({ error: 'Fecha requerida' });
 
     const classes = await db.query(`
-      SELECT ci.id, ci.class_date, ci.start_time, ci.end_time,
+      SELECT ci.id, ci.class_date, ci.start_time, ci.end_time, ci.status,
              s.name as session_name,
              i.name as instructor_name,
              COUNT(b.id) FILTER (WHERE b.status != 'cancelled') as enrolled,
@@ -1088,6 +1088,93 @@ const correctAttendance = async (req, res) => {
   }
 };
 
+// POST /api/admin/classes/:classInstanceId/cancel — cancelar una clase puntual
+const cancelClass = async (req, res) => {
+  try {
+    const { classInstanceId } = req.params;
+    const gymId = req.gym.id;
+
+    // Verificar que la clase existe
+    const cls = await db.query(
+      'SELECT id, class_date, start_time, session_id FROM class_instances WHERE id=$1 AND gym_id=$2',
+      [classInstanceId, gymId]
+    );
+    if (!cls.rows.length) return res.status(404).json({ error: 'Clase no encontrada' });
+
+    // Traer inscritos para notificar
+    const enrolled = await db.query(
+      "SELECT user_id FROM bookings WHERE class_instance_id=$1 AND status='confirmed'",
+      [classInstanceId]
+    );
+
+    // Marcar la clase como cancelada
+    await db.query(
+      "UPDATE class_instances SET status='cancelled' WHERE id=$1",
+      [classInstanceId]
+    );
+
+    // Cancelar las reservas confirmadas
+    await db.query(
+      "UPDATE bookings SET status='cancelled' WHERE class_instance_id=$1 AND status='confirmed'",
+      [classInstanceId]
+    );
+
+    // Notificar a cada inscrito
+    const c = cls.rows[0];
+    const fecha = new Date(c.class_date).toLocaleDateString('es-EC');
+    for (const row of enrolled.rows) {
+      await db.query(`
+        INSERT INTO notifications (user_id, gym_id, title, message, type)
+        VALUES ($1, $2, 'Clase cancelada', $3, 'class')
+      `, [row.user_id, gymId, `Tu clase del ${fecha} a las ${c.start_time?.slice(0,5)} fue cancelada. Tu reserva ha sido liberada.`]);
+    }
+
+    res.json({ message: 'Clase cancelada', notified: enrolled.rows.length });
+  } catch (err) {
+    console.error('Error cancelClass:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// POST /api/admin/classes/cancel-day — cancelar todas las clases de un día
+const cancelDay = async (req, res) => {
+  try {
+    const gymId = req.gym.id;
+    const { date } = req.body;
+    if (!date) return res.status(400).json({ error: 'Fecha requerida' });
+
+    // Traer todas las clases del día
+    const classes = await db.query(
+      "SELECT id, start_time FROM class_instances WHERE gym_id=$1 AND class_date=$2 AND status != 'cancelled'",
+      [gymId, date]
+    );
+
+    let totalNotified = 0;
+    for (const cls of classes.rows) {
+      const enrolled = await db.query(
+        "SELECT user_id FROM bookings WHERE class_instance_id=$1 AND status='confirmed'",
+        [cls.id]
+      );
+      await db.query("UPDATE class_instances SET status='cancelled' WHERE id=$1", [cls.id]);
+      await db.query("UPDATE bookings SET status='cancelled' WHERE class_instance_id=$1 AND status='confirmed'", [cls.id]);
+
+      const fecha = new Date(date).toLocaleDateString('es-EC');
+      for (const row of enrolled.rows) {
+        await db.query(`
+          INSERT INTO notifications (user_id, gym_id, title, message, type)
+          VALUES ($1, $2, 'Clase cancelada', $3, 'class')
+        `, [row.user_id, gymId, `Las clases del ${fecha} fueron canceladas. Tu reserva ha sido liberada.`]);
+        totalNotified++;
+      }
+    }
+
+    res.json({ message: 'Día cancelado', classesCancelled: classes.rows.length, notified: totalNotified });
+  } catch (err) {
+    console.error('Error cancelDay:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
 module.exports = {
   getDashboard, getUsers, getUserDetail, createUser, updateUser, resetUserPassword,
   getMembershipTypes, getMemberships, cancelMembership, createMembershipType, updateMembershipType, deleteMembershipType,
@@ -1096,5 +1183,5 @@ module.exports = {
   getInstructors, createInstructor, updateInstructor, deleteInstructor,
   getReceptionists, createReceptionist,
   getPayments, getReports, getReceptionAudit, getAttendanceHistory, validateEntry,getUserMembershipsHistory, getAttendanceClasses,
-   getAttendanceStudents, correctAttendance
+   getAttendanceStudents, correctAttendance, cancelClass, cancelDay
 };
