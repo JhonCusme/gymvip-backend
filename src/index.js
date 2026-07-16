@@ -20,7 +20,6 @@ const PORT = process.env.PORT || 3001;
 // SEGURIDAD
 // ============================================================
 app.use(helmet());
-const cors = require('cors');
 
 // Lista de orígenes permitidos
 const allowedOrigins = [
