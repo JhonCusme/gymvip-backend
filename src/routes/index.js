@@ -149,10 +149,9 @@ router.get('/admin/schedules', ...adminAuth, adminCtrl.getSchedules);
 router.post('/admin/schedules', ...adminAuth, adminCtrl.createSchedule);
 router.delete('/admin/schedules/:scheduleId', ...adminAuth, adminCtrl.deleteSchedule);
 
-// Clases y asistencia
-router.get('/admin/classes/:classInstanceId/attendance', ...adminAuth, adminCtrl.getAttendanceStudents);
-router.post('/admin/classes/:classInstanceId/attendance', ...adminAuth, adminCtrl.correctAttendance);
-router.get('/admin/attendance-classes', ...adminAuth, adminCtrl.getAttendanceClasses);
+router.get('/admin/attendance/classes', ...adminAuth, adminCtrl.getAttendanceClasses);
+router.get('/admin/attendance/classes/:classInstanceId/students', ...adminAuth, adminCtrl.getAttendanceStudents);
+router.post('/admin/attendance/bookings/:bookingId', ...adminAuth, adminCtrl.correctAttendance);
 
 // Instructores
 router.get('/admin/instructors', ...adminAuth, adminCtrl.getInstructors);
