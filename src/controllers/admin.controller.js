@@ -1012,6 +1012,82 @@ const getUserMembershipsHistory = async (req, res) => {
   }
 };
 
+// GET /api/admin/attendance/classes?date= — clases de una fecha con inscritos
+const getAttendanceClasses = async (req, res) => {
+  try {
+    const gymId = req.gym.id;
+    const { date } = req.query;
+    if (!date) return res.status(400).json({ error: 'Fecha requerida' });
+
+    const classes = await db.query(`
+      SELECT ci.id, ci.class_date, ci.start_time, ci.end_time,
+             s.name as session_name,
+             i.name as instructor_name,
+             COUNT(b.id) FILTER (WHERE b.status != 'cancelled') as enrolled,
+             COUNT(b.id) FILTER (WHERE b.status = 'attended') as attended_count
+      FROM class_instances ci
+      JOIN sessions s ON s.id = ci.session_id
+      LEFT JOIN instructors i ON i.id = ci.instructor_id
+      LEFT JOIN bookings b ON b.class_instance_id = ci.id
+      WHERE ci.gym_id = $1 AND ci.class_date = $2
+      GROUP BY ci.id, s.name, i.name
+      ORDER BY ci.start_time ASC
+    `, [gymId, date]);
+
+    res.json(classes.rows);
+  } catch (err) {
+    console.error('Error getAttendanceClasses:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// GET /api/admin/attendance/classes/:classInstanceId/students — alumnos de una clase
+const getAttendanceStudents = async (req, res) => {
+  try {
+    const { classInstanceId } = req.params;
+    const gymId = req.gym.id;
+
+    const cls = await db.query('SELECT id FROM class_instances WHERE id=$1 AND gym_id=$2', [classInstanceId, gymId]);
+    if (!cls.rows.length) return res.status(404).json({ error: 'Clase no encontrada' });
+
+    const students = await db.query(`
+      SELECT b.id as booking_id, b.status,
+             u.id as user_id, u.name, u.cedula
+      FROM bookings b
+      JOIN users u ON u.id = b.user_id
+      WHERE b.class_instance_id = $1 AND b.status != 'cancelled'
+      ORDER BY u.name ASC
+    `, [classInstanceId]);
+
+    res.json(students.rows);
+  } catch (err) {
+    console.error('Error getAttendanceStudents:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// POST /api/admin/attendance/bookings/:bookingId — corregir asistencia (sin límite de tiempo)
+const correctAttendance = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const { attended } = req.body;
+    const gymId = req.gym.id;
+
+    const newStatus = attended ? 'attended' : 'no_show';
+    const result = await db.query(
+      "UPDATE bookings SET status=$1 WHERE id=$2 AND gym_id=$3 RETURNING id, status",
+      [newStatus, bookingId, gymId]
+    );
+
+    if (!result.rows.length) return res.status(404).json({ error: 'Reserva no encontrada' });
+
+    res.json({ message: 'Asistencia corregida', booking: result.rows[0] });
+  } catch (err) {
+    console.error('Error correctAttendance:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
 module.exports = {
   getDashboard, getUsers, getUserDetail, createUser, updateUser, resetUserPassword,
   getMembershipTypes, getMemberships, cancelMembership, createMembershipType, updateMembershipType, deleteMembershipType,
@@ -1019,5 +1095,6 @@ module.exports = {
   getSchedules, createSchedule, deleteSchedule,
   getInstructors, createInstructor, updateInstructor, deleteInstructor,
   getReceptionists, createReceptionist,
-  getPayments, getReports, getReceptionAudit, getAttendanceHistory, validateEntry,getUserMembershipsHistory
+  getPayments, getReports, getReceptionAudit, getAttendanceHistory, validateEntry,getUserMembershipsHistory, getAttendanceClasses,
+   getAttendanceStudents, correctAttendance
 };
