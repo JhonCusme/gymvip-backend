@@ -127,6 +127,7 @@ router.put('/admin/users/:userId', ...adminAuth, adminCtrl.updateUser);
 router.post('/admin/users/:userId/reset-password', ...adminAuth, adminCtrl.resetUserPassword);
 router.post('/admin/users/:userId/activate-membership', ...adminAuth, adminCtrl.activateMembership);
 router.get('/admin/users/:userId/memberships-history', ...adminAuth, adminCtrl.getUserMembershipsHistory);
+router.get('/admin/birthdays', ...adminAuth, adminCtrl.getBirthdays);
 
 // Tipos de membresía
 router.get('/admin/membership-types', ...adminAuth, adminCtrl.getMembershipTypes);
@@ -233,6 +234,7 @@ router.get('/recepcion/attendance', ...recepAuth, receptionCtrl.getAttendance);
 router.get('/recepcion/membership-types', ...recepAuth, receptionCtrl.getMembershipTypes);
 router.post('/recepcion/memberships/:membershipId/cancel', ...recepAuth, receptionCtrl.cancelMembership);
 router.get('/recepcion/users/:userId/memberships-history', ...recepAuth, receptionCtrl.getUserMembershipsHistory);
+router.get('/recepcion/birthdays', ...recepAuth, receptionCtrl.getBirthdays);
 
 // ============================================================
 // USUARIO / CLIENTE

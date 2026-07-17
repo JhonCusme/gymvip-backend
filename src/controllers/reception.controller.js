@@ -668,9 +668,54 @@ const getUserMembershipsHistory = async (req, res) => {
   }
 };
 
+// GET /api/recepcion/birthdays?filter=today|week|month
+const getBirthdays = async (req, res) => {
+  try {
+    const gymId = req.gym.id;
+    const { filter = 'today' } = req.query;
+    const tz = req.gym.timezone || 'America/Guayaquil';
+
+    let condition = '';
+    if (filter === 'today') {
+      condition = `EXTRACT(MONTH FROM u.birth_date) = EXTRACT(MONTH FROM (NOW() AT TIME ZONE '${tz}'))
+                   AND EXTRACT(DAY FROM u.birth_date) = EXTRACT(DAY FROM (NOW() AT TIME ZONE '${tz}'))`;
+    } else if (filter === 'week') {
+      condition = `MAKE_DATE(
+                     EXTRACT(YEAR FROM (NOW() AT TIME ZONE '${tz}'))::int,
+                     EXTRACT(MONTH FROM u.birth_date)::int,
+                     EXTRACT(DAY FROM u.birth_date)::int
+                   ) BETWEEN
+                     DATE_TRUNC('week', (NOW() AT TIME ZONE '${tz}'))::date
+                     AND (DATE_TRUNC('week', (NOW() AT TIME ZONE '${tz}'))::date + 6)`;
+    } else if (filter === 'month') {
+      condition = `EXTRACT(MONTH FROM u.birth_date) = EXTRACT(MONTH FROM (NOW() AT TIME ZONE '${tz}'))`;
+    }
+
+    const result = await db.query(`
+      SELECT u.id, u.name, u.cedula, u.phone, u.birth_date,
+             EXTRACT(DAY FROM u.birth_date)::int as day,
+             EXTRACT(MONTH FROM u.birth_date)::int as month
+      FROM users u
+      JOIN user_gym_roles ugr ON ugr.user_id = u.id
+      WHERE ugr.gym_id = $1 AND ugr.role = 'user' AND ugr.is_active = TRUE
+        AND u.birth_date IS NOT NULL
+        AND ${condition}
+        AND u.id NOT IN (
+          SELECT user_id FROM user_gym_roles WHERE gym_id = $1 AND role IN ('admin','instructor','recepcionista') AND is_active = TRUE
+        )
+      ORDER BY EXTRACT(MONTH FROM u.birth_date), EXTRACT(DAY FROM u.birth_date)
+    `, [gymId]);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error getBirthdays recepcion:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
 module.exports = {
   getDashboard, getClients, getClientDetail, createClient,
   createMembership, registerPayment, getMemberships, getPayments,
   getSchedules, bookClient, getEnrolled, validateEntry, getAttendance,
-  getMembershipTypes, cancelMembership, getUserMembershipsHistory
+  getMembershipTypes, cancelMembership, getUserMembershipsHistory, getBirthdays
 };
