@@ -276,7 +276,7 @@ const memResult = await db.query(`
 if (cardToken) {
   await db.query(
     'UPDATE users SET payphone_token = $1, payphone_token_date = NOW() WHERE id = $2',
-    [cardToken, intent.user_id]
+    [encrypt(cardToken), intent.user_id]
   );
 }
 
