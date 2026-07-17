@@ -1,5 +1,6 @@
 const axios = require('axios');
 const db = require('../config/database');
+const { encrypt, decrypt } = require('../utils/crypto');
 
 const PAYPHONE_CONFIRM_URL = 'https://paymentbox.payphonetodoesposible.com/api/confirm';
 
@@ -91,7 +92,7 @@ const amountCents = Math.round(finalPrice * 100);
 
     // Devolver parámetros al frontend para renderizar la cajita
     res.json({
-      token: gym.payphone_token,
+      token: decrypt(gym.payphone_token),
       storeId: gym.payphone_store_id,
       clientTransactionId,
       amount: amountCents,
@@ -172,7 +173,7 @@ const confirmPayment = async (req, res) => {
         { id: parseInt(id), clientTxId: clientTransactionId },
         {
           headers: {
-            'Authorization': `Bearer ${intent.payphone_token}`,
+            'Authorization': `Bearer ${decrypt(intent.payphone_token)}`,
             'Content-Type': 'application/json'
           },
           timeout: 10000
@@ -436,9 +437,12 @@ const saveGymPayphoneCredentials = async (req, res) => {
       return res.status(400).json({ error: 'StoreId y Token son requeridos' });
     }
 
+    // Cifrar el token antes de guardar
+    const encryptedToken = encrypt(token);
+
     await db.query(
       'UPDATE gyms SET payphone_store_id = $1, payphone_token = $2, payphone_coding_password = $3, updated_at = NOW() WHERE id = $4',
-      [storeId, token, codingPassword || null, gymId]
+      [storeId, encryptedToken, codingPassword || null, gymId]
     );
 
     res.json({ message: 'Credenciales guardadas exitosamente' });
@@ -501,7 +505,11 @@ const processRecurringPayments = async () => {
 
         // Cobrar con cardToken
        const encryptedHolder = encryptCardHolder(mem.user_name, mem.payphone_coding_password);
+// Descifrar tokens antes de usarlos
+    const gymTokenPlain = decrypt(mem.gym_token);
+    const cardTokenPlain = decrypt(mem.card_token);
 
+  
 const payphoneRes = await axios.post(
   'https://pay.payphonetodoesposible.com/api/transaction/web',
   {
@@ -511,7 +519,7 @@ const payphoneRes = await axios.post(
     clientTransactionId,
     storeId: mem.payphone_store_id,
     reference: `Renovación ${mem.type_name}`,
-    cardToken: mem.card_token,
+    cardToken: cardTokenPlain,
     cardHolder: encryptedHolder,
     email: mem.email,
     phoneNumber: mem.phone ? `+593${mem.phone.replace(/^0/, '')}` : undefined,
@@ -544,7 +552,7 @@ const payphoneRes = await axios.post(
           },
   {
     headers: {
-      'Authorization': `Bearer ${mem.gym_token}`,
+      'Authorization': `Bearer ${gymTokenPlain}`,
       'Content-Type': 'application/json'
     },
     timeout: 15000

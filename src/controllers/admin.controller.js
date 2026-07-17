@@ -1,6 +1,6 @@
 const bcrypt = require('bcryptjs');
 const db = require('../config/database');
-
+const { decrypt } = require('../utils/crypto');
 // ============================================================
 // USUARIOS
 // ============================================================
@@ -932,7 +932,7 @@ const cancelMembership = async (req, res) => {
         'SELECT payphone_token FROM gyms WHERE id = $1',
         [gymId]
       );
-      const token = gymCfg.rows[0]?.payphone_token;
+      const token = decrypt(gymCfg.rows[0]?.payphone_token);
 
       if (!token) {
         return res.status(400).json({ error: 'No hay credenciales de PayPhone configuradas' });
