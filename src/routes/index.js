@@ -95,6 +95,14 @@ router.post('/super/gyms/:gymId/membership-plans', authenticate, requireSuperAdm
 router.post('/super/gyms/:gymId/apply-theme', authenticate, requireSuperAdmin, superCtrl.applyTheme);
 router.get('/super/reports', authenticate, requireSuperAdmin, superCtrl.getGlobalReport);
 router.get('/super/themes', authenticate, requireSuperAdmin, superCtrl.getThemes);
+router.get('/super/saas-plans', authenticate, requireSuperAdmin, superCtrl.getSaasPlans);
+router.post('/super/saas-plans', authenticate, requireSuperAdmin, superCtrl.createSaasPlan);
+router.put('/super/saas-plans/:id', authenticate, requireSuperAdmin, superCtrl.updateSaasPlan);
+router.get('/super/subscriptions', authenticate, requireSuperAdmin, superCtrl.getSubscriptions);
+router.post('/super/gyms/:gymId/assign-plan', authenticate, requireSuperAdmin, superCtrl.assignPlanToGym);
+router.post('/super/gyms/:gymId/register-payment', authenticate, requireSuperAdmin, superCtrl.registerGymPayment);
+router.post('/super/gyms/:gymId/toggle-suspension', authenticate, requireSuperAdmin, superCtrl.toggleGymSuspension);
+router.get('/super/gyms/:gymId/payments', authenticate, requireSuperAdmin, superCtrl.getGymPayments);
 
 // ============================================================
 // ADMIN DEL GYM

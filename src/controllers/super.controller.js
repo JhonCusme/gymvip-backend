@@ -350,9 +350,186 @@ const deleteGym = async (req, res) => {
   }
 };
 
+// GET /api/super/saas-plans — listar planes
+const getSaasPlans = async (req, res) => {
+  try {
+    const result = await db.query('SELECT * FROM saas_plans ORDER BY sort_order ASC, price ASC');
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error getSaasPlans:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// POST /api/super/saas-plans — crear plan
+const createSaasPlan = async (req, res) => {
+  try {
+    const { name, maxUsers, price, sortOrder } = req.body;
+    if (!name || price == null) return res.status(400).json({ error: 'Nombre y precio requeridos' });
+    const result = await db.query(
+      'INSERT INTO saas_plans (name, max_users, price, sort_order) VALUES ($1,$2,$3,$4) RETURNING *',
+      [name, maxUsers || null, price, sortOrder || 0]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('Error createSaasPlan:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// PUT /api/super/saas-plans/:id — editar plan
+const updateSaasPlan = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, maxUsers, price, isActive, sortOrder } = req.body;
+    const result = await db.query(
+      'UPDATE saas_plans SET name=$1, max_users=$2, price=$3, is_active=$4, sort_order=$5 WHERE id=$6 RETURNING *',
+      [name, maxUsers || null, price, isActive !== false, sortOrder || 0, id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Plan no encontrado' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updateSaasPlan:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// POST /api/super/gyms/:gymId/assign-plan — asignar plan a un gym
+const assignPlanToGym = async (req, res) => {
+  try {
+    const { gymId } = req.params;
+    const { planId, customPrice, customMaxUsers, startDate } = req.body;
+
+    let price, maxUsers, planIdToSave;
+
+    if (planId === 'custom') {
+      // Plan personalizado
+      if (customPrice == null) return res.status(400).json({ error: 'Precio personalizado requerido' });
+      price = customPrice;
+      maxUsers = customMaxUsers || null;
+      planIdToSave = null;
+    } else {
+      // Plan predefinido
+      const plan = await db.query('SELECT * FROM saas_plans WHERE id=$1', [planId]);
+      if (!plan.rows.length) return res.status(404).json({ error: 'Plan no encontrado' });
+      price = plan.rows[0].price;
+      maxUsers = plan.rows[0].max_users;
+      planIdToSave = planId;
+    }
+
+    const start = startDate || new Date().toISOString().split('T')[0];
+    // Próximo pago: un mes después del inicio
+    const nextPayment = new Date(start + 'T00:00:00');
+    nextPayment.setMonth(nextPayment.getMonth() + 1);
+
+    await db.query(`
+      UPDATE gyms SET
+        saas_plan_id = $1, saas_price = $2, saas_max_users = $3,
+        saas_status = 'active', saas_start_date = $4, saas_next_payment = $5
+      WHERE id = $6
+    `, [planIdToSave, price, maxUsers, start, nextPayment.toISOString().split('T')[0], gymId]);
+
+    res.json({ message: 'Plan asignado exitosamente' });
+  } catch (err) {
+    console.error('Error assignPlanToGym:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// POST /api/super/gyms/:gymId/register-payment — registrar pago del gym
+const registerGymPayment = async (req, res) => {
+  try {
+    const { gymId } = req.params;
+    const { amount, notes } = req.body;
+
+    const gym = await db.query('SELECT saas_price, saas_next_payment FROM gyms WHERE id=$1', [gymId]);
+    if (!gym.rows.length) return res.status(404).json({ error: 'Gym no encontrado' });
+
+    const currentNext = gym.rows[0].saas_next_payment;
+    const periodStart = currentNext || new Date().toISOString().split('T')[0];
+    // Extender un mes desde la fecha de vencimiento actual
+    const periodEnd = new Date(periodStart + 'T00:00:00');
+    periodEnd.setMonth(periodEnd.getMonth() + 1);
+    const periodEndStr = periodEnd.toISOString().split('T')[0];
+
+    // Registrar el pago
+    await db.query(`
+      INSERT INTO gym_subscription_payments (gym_id, amount, period_start, period_end, notes, registered_by)
+      VALUES ($1, $2, $3, $4, $5, $6)
+    `, [gymId, amount || gym.rows[0].saas_price, periodStart, periodEndStr, notes || null, req.user.id]);
+
+    // Actualizar próximo pago y reactivar si estaba suspendido
+    await db.query(`
+      UPDATE gyms SET saas_next_payment = $1, saas_status = 'active' WHERE id = $2
+    `, [periodEndStr, gymId]);
+
+    res.json({ message: 'Pago registrado', nextPayment: periodEndStr });
+  } catch (err) {
+    console.error('Error registerGymPayment:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// POST /api/super/gyms/:gymId/toggle-suspension — suspender/reactivar gym
+const toggleGymSuspension = async (req, res) => {
+  try {
+    const { gymId } = req.params;
+    const { suspend } = req.body;
+    const newStatus = suspend ? 'suspended' : 'active';
+    await db.query('UPDATE gyms SET saas_status=$1 WHERE id=$2', [newStatus, gymId]);
+    res.json({ message: suspend ? 'Gym suspendido' : 'Gym reactivado' });
+  } catch (err) {
+    console.error('Error toggleGymSuspension:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// GET /api/super/subscriptions — lista de gyms con estado de suscripción y conteo de usuarios
+const getSubscriptions = async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT g.id, g.name, g.slug, g.saas_status, g.saas_price, g.saas_max_users,
+             g.saas_start_date, g.saas_next_payment,
+             sp.name as plan_name,
+             (SELECT COUNT(*) FROM user_gym_roles ugr 
+              WHERE ugr.gym_id = g.id AND ugr.role = 'user' AND ugr.is_active = TRUE
+              AND ugr.user_id NOT IN (
+                SELECT user_id FROM user_gym_roles WHERE gym_id = g.id AND role IN ('admin','instructor','recepcionista') AND is_active = TRUE
+              )) as current_users,
+             (g.saas_next_payment - CURRENT_DATE) as days_to_payment
+      FROM gyms g
+      LEFT JOIN saas_plans sp ON sp.id = g.saas_plan_id
+      WHERE g.is_active = TRUE
+      ORDER BY g.saas_next_payment ASC NULLS LAST
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error getSubscriptions:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// GET /api/super/gyms/:gymId/payments — historial de pagos de un gym
+const getGymPayments = async (req, res) => {
+  try {
+    const { gymId } = req.params;
+    const result = await db.query(
+      'SELECT * FROM gym_subscription_payments WHERE gym_id=$1 ORDER BY paid_at DESC',
+      [gymId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error getGymPayments:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
 module.exports = {
   getGyms, createGym, updateGym, toggleGym, deleteGym,
   getGymAdmins, addGymAdmin, removeGymAdmin,
   getGymMembershipPlans, createMembershipPlan,
-  getGlobalReport, getThemes, applyTheme
+  getGlobalReport, getThemes, applyTheme,
+  getSaasPlans, createSaasPlan, updateSaasPlan,
+  assignPlanToGym, registerGymPayment, toggleGymSuspension,
+  getSubscriptions, getGymPayments
 };
