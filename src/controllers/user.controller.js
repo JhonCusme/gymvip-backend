@@ -635,11 +635,59 @@ const cancelBooking = async (req, res) => {
   }
 };
 
+// GET /api/usuario/prs — listar PRs del usuario
+const getPRs = async (req, res) => {
+  try {
+    const result = await db.query(
+      'SELECT id, exercise, weight, unit, updated_at FROM user_prs WHERE user_id=$1 AND gym_id=$2 ORDER BY exercise ASC',
+      [req.user.id, req.gym.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error getPRs:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// POST /api/usuario/prs — guardar o actualizar un PR
+const savePR = async (req, res) => {
+  try {
+    const { exercise, weight, unit } = req.body;
+    if (!exercise || !weight) return res.status(400).json({ error: 'Ejercicio y peso son requeridos' });
+    if (weight <= 0) return res.status(400).json({ error: 'El peso debe ser mayor a 0' });
+
+    const result = await db.query(`
+      INSERT INTO user_prs (user_id, gym_id, exercise, weight, unit)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (user_id, gym_id, exercise)
+      DO UPDATE SET weight = $4, unit = $5, updated_at = NOW()
+      RETURNING id, exercise, weight, unit, updated_at
+    `, [req.user.id, req.gym.id, exercise.trim(), weight, unit || 'lb']);
+
+    res.json({ message: 'PR guardado', pr: result.rows[0] });
+  } catch (err) {
+    console.error('Error savePR:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// DELETE /api/usuario/prs/:id — eliminar un PR
+const deletePR = async (req, res) => {
+  try {
+    const { id } = req.params;
+    await db.query('DELETE FROM user_prs WHERE id=$1 AND user_id=$2', [id, req.user.id]);
+    res.json({ message: 'PR eliminado' });
+  } catch (err) {
+    console.error('Error deletePR:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
 module.exports = {
   getHome, getSchedule, bookClass, cancelBooking, getMyBookings,
   getMyQR, getProfile, updateProfile, getPaymentHistory,
   getNotifications, getMembershipPlans,
   initiatePayphonePayment, signAutoChargeConsent,
   getAutoChargeStatus, cancelAutoCharge,
-  getTodayWod, paymentResult, cancelAutoRenew
+  getTodayWod, paymentResult, cancelAutoRenew, getPRs, savePR, deletePR
 };

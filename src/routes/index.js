@@ -254,6 +254,9 @@ router.get('/usuario/membership-plans', ...userAuth, userCtrl.getMembershipPlans
 router.get('/usuario/wod', ...userAuth, userCtrl.getTodayWod);
 router.post('/usuario/cancel-auto-renew', ...userAuth, userCtrl.cancelAutoRenew);
 router.post('/usuario/bookings/:bookingId/cancel', ...userAuth, userCtrl.cancelBooking);
+router.get('/usuario/prs', ...userAuth, userCtrl.getPRs);
+router.post('/usuario/prs', ...userAuth, userCtrl.savePR);
+router.delete('/usuario/prs/:id', ...userAuth, userCtrl.deletePR);
 
 
 // PayPhone — Cajita de Pagos (flujo correcto según documentación oficial)
