@@ -103,6 +103,7 @@ router.post('/super/gyms/:gymId/assign-plan', authenticate, requireSuperAdmin, s
 router.post('/super/gyms/:gymId/register-payment', authenticate, requireSuperAdmin, superCtrl.registerGymPayment);
 router.post('/super/gyms/:gymId/toggle-suspension', authenticate, requireSuperAdmin, superCtrl.toggleGymSuspension);
 router.get('/super/gyms/:gymId/payments', authenticate, requireSuperAdmin, superCtrl.getGymPayments);
+router.get('/super/billing-periods', authenticate, requireSuperAdmin, superCtrl.getBillingPeriods);
 
 // ============================================================
 // ADMIN DEL GYM
