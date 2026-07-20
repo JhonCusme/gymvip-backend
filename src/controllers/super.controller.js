@@ -440,30 +440,33 @@ const assignPlanToGym = async (req, res) => {
 const registerGymPayment = async (req, res) => {
   try {
     const { gymId } = req.params;
-    const { amount, notes } = req.body;
+    const { amount, notes, months } = req.body;
+    const monthsToAdd = parseInt(months) || 1;
 
     const gym = await db.query('SELECT saas_price, saas_next_payment FROM gyms WHERE id=$1', [gymId]);
     if (!gym.rows.length) return res.status(404).json({ error: 'Gym no encontrado' });
 
     const currentNext = gym.rows[0].saas_next_payment;
-    const periodStart = currentNext || new Date().toISOString().split('T')[0];
-    // Extender un mes desde la fecha de vencimiento actual
-    const periodEnd = new Date(periodStart + 'T00:00:00');
-    periodEnd.setMonth(periodEnd.getMonth() + 1);
+    const periodStart = currentNext
+      ? new Date(currentNext).toISOString().split('T')[0]
+      : new Date().toISOString().split('T')[0];
+
+    // Extender según los meses pagados
+    const [py, pm, pd] = periodStart.split('-').map(Number);
+    const periodEnd = new Date(Date.UTC(py, pm - 1, pd));
+    periodEnd.setUTCMonth(periodEnd.getUTCMonth() + monthsToAdd);
     const periodEndStr = periodEnd.toISOString().split('T')[0];
 
-    // Registrar el pago
     await db.query(`
-      INSERT INTO gym_subscription_payments (gym_id, amount, period_start, period_end, notes, registered_by)
-      VALUES ($1, $2, $3, $4, $5, $6)
-    `, [gymId, amount || gym.rows[0].saas_price, periodStart, periodEndStr, notes || null, req.user.id]);
+      INSERT INTO gym_subscription_payments (gym_id, amount, period_start, period_end, notes, registered_by, months_covered)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `, [gymId, amount || gym.rows[0].saas_price, periodStart, periodEndStr, notes || null, req.user.id, monthsToAdd]);
 
-    // Actualizar próximo pago y reactivar si estaba suspendido
     await db.query(`
-      UPDATE gyms SET saas_next_payment = $1, saas_status = 'active' WHERE id = $2
-    `, [periodEndStr, gymId]);
+      UPDATE gyms SET saas_next_payment = $1, saas_status = 'active', saas_billing_months = $2 WHERE id = $3
+    `, [periodEndStr, monthsToAdd, gymId]);
 
-    res.json({ message: 'Pago registrado', nextPayment: periodEndStr });
+    res.json({ message: 'Pago registrado', nextPayment: periodEndStr, monthsCovered: monthsToAdd });
   } catch (err) {
     console.error('Error registerGymPayment:', err.message);
     res.status(500).json({ error: 'Error interno' });
@@ -524,6 +527,17 @@ const getGymPayments = async (req, res) => {
   }
 };
 
+// GET /api/super/billing-periods — listar períodos de facturación
+const getBillingPeriods = async (req, res) => {
+  try {
+    const result = await db.query('SELECT * FROM saas_billing_periods WHERE is_active = TRUE ORDER BY sort_order ASC');
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error getBillingPeriods:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
 module.exports = {
   getGyms, createGym, updateGym, toggleGym, deleteGym,
   getGymAdmins, addGymAdmin, removeGymAdmin,
@@ -531,5 +545,5 @@ module.exports = {
   getGlobalReport, getThemes, applyTheme,
   getSaasPlans, createSaasPlan, updateSaasPlan,
   assignPlanToGym, registerGymPayment, toggleGymSuspension,
-  getSubscriptions, getGymPayments
+  getSubscriptions, getGymPayments, getBillingPeriods
 };
