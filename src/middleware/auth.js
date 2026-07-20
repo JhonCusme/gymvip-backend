@@ -94,7 +94,7 @@ const loadGym = async (req, res, next) => {
     const result = await db.query(
       `SELECT id, slug, name, logo_url, email, phone, address, 
               primary_color, secondary_color, theme, booking_advance_days,
-              is_active, payphone_enabled, timezone
+              is_active, payphone_enabled, timezone, saas_status
        FROM gyms WHERE slug = $1`,
       [slug]
     );
@@ -103,7 +103,18 @@ const loadGym = async (req, res, next) => {
       return res.status(404).json({ error: 'Gimnasio no encontrado' });
     }
 
-    req.gym = result.rows[0];
+    const gym = result.rows[0];
+
+    // Bloqueo por suspensión de pago del SaaS (402 = Payment Required)
+    if (gym.saas_status === 'suspended') {
+      return res.status(402).json({
+        error: 'SERVICE_SUSPENDED',
+        gymName: gym.name,
+        message: 'El servicio está temporalmente suspendido.'
+      });
+    }
+
+    req.gym = gym;
     next();
   } catch (err) {
     console.error('Error en loadGym:', err);
