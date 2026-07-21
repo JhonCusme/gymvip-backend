@@ -173,7 +173,29 @@ const createUser = async (req, res) => {
 const updateUser = async (req, res) => {
   try {
     const { userId } = req.params;
+    const gymId = req.gym.id;
     const { name, email, phone, birthDate, emergencyContactName, emergencyContactPhone, isActive } = req.body;
+
+    // Si se está REACTIVANDO un usuario (de inactivo a activo), verificar límite
+    if (isActive === true) {
+      const currentState = await db.query('SELECT is_active FROM users WHERE id=$1', [userId]);
+      const wasInactive = currentState.rows.length && currentState.rows[0].is_active === false;
+
+      if (wasInactive) {
+        // Verificar que sea cliente (no staff)
+        const isClient = await db.query(`
+          SELECT 1 FROM user_gym_roles WHERE user_id=$1 AND gym_id=$2 AND role='user'
+          AND user_id NOT IN (SELECT user_id FROM user_gym_roles WHERE gym_id=$2 AND role IN ('admin','instructor','recepcionista') AND is_active=TRUE)
+        `, [userId, gymId]);
+
+        if (isClient.rows.length) {
+          const limitCheck = await canAddUser(gymId);
+          if (!limitCheck.allowed) {
+            return res.status(403).json({ error: `No puedes reactivar este cliente: ${limitCheck.reason}` });
+          }
+        }
+      }
+    }
 
     const result = await db.query(`
       UPDATE users SET
@@ -188,6 +210,7 @@ const updateUser = async (req, res) => {
     if (!result.rows.length) return res.status(404).json({ error: 'Usuario no encontrado' });
     res.json(result.rows[0]);
   } catch (err) {
+    console.error('Error updateUser:', err);
     res.status(500).json({ error: 'Error interno' });
   }
 };
