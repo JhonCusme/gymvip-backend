@@ -65,7 +65,7 @@ const getClients = async (req, res) => {
     }
 
     const result = await db.query(`
-      SELECT u.id, u.name, u.cedula, u.phone,
+      SELECT u.id, u.name, u.cedula, u.phone, u.is_active,
         CASE 
           WHEN m.id IS NOT NULL THEN mt.name
           ELSE NULL
