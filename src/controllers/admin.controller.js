@@ -1282,6 +1282,46 @@ const getBirthdays = async (req, res) => {
   }
 };
 
+// GET /api/admin/plan-usage — estado del límite del plan
+const getPlanUsage = async (req, res) => {
+  try {
+    const gymId = req.gym.id;
+    const gym = await db.query('SELECT saas_max_users FROM gyms WHERE id=$1', [gymId]);
+    const maxUsers = gym.rows[0]?.saas_max_users;
+
+    const count = await db.query(`
+      SELECT COUNT(*) as total FROM user_gym_roles ugr
+      JOIN users u ON u.id = ugr.user_id
+      WHERE ugr.gym_id = $1 AND ugr.role = 'user' AND ugr.is_active = TRUE AND u.is_active = TRUE
+        AND ugr.user_id NOT IN (
+          SELECT user_id FROM user_gym_roles WHERE gym_id = $1 AND role IN ('admin','instructor','recepcionista') AND is_active = TRUE
+        )
+    `, [gymId]);
+
+    const current = parseInt(count.rows[0].total);
+
+    if (!maxUsers) {
+      return res.json({ unlimited: true, current });
+    }
+
+    const hardLimit = Math.floor(maxUsers * 1.10);
+    const graceLeft = Math.max(0, hardLimit - current);
+    const pct = (current / maxUsers) * 100;
+
+    res.json({
+      unlimited: false,
+      current,
+      maxUsers,
+      hardLimit,
+      graceLeft,
+      pct: Math.round(pct),
+      status: current >= hardLimit ? 'blocked' : pct >= 100 ? 'over' : pct >= 80 ? 'warning' : 'ok'
+    });
+  } catch (err) {
+    console.error('Error getPlanUsage:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
 module.exports = {
   getDashboard, getUsers, getUserDetail, createUser, updateUser, resetUserPassword,
   getMembershipTypes, getMemberships, cancelMembership, createMembershipType, updateMembershipType, deleteMembershipType,
@@ -1290,5 +1330,5 @@ module.exports = {
   getInstructors, createInstructor, updateInstructor, deleteInstructor,
   getReceptionists, createReceptionist,
   getPayments, getReports, getReceptionAudit, getAttendanceHistory, validateEntry,getUserMembershipsHistory, getAttendanceClasses,
-   getAttendanceStudents, correctAttendance, cancelClass, cancelDay, bookStudent, getBirthdays
+   getAttendanceStudents, correctAttendance, cancelClass, cancelDay, bookStudent, getBirthdays, getPlanUsage
 };
