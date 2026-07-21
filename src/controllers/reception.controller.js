@@ -106,7 +106,7 @@ const getClientDetail = async (req, res) => {
     const gymId = req.gym.id;
 
     const userResult = await db.query(`
-      SELECT u.id, u.cedula, u.name, u.email, u.phone, u.qr_code,
+      SELECT u.id, u.cedula, u.name, u.email, u.phone, u.qr_code, u.is_active,
              u.birth_date, u.emergency_contact_name, u.emergency_contact_phone
       FROM users u
       JOIN user_gym_roles ugr ON ugr.user_id = u.id AND ugr.gym_id = $2 AND ugr.role = 'user'
@@ -760,9 +760,48 @@ const getPlanUsage = async (req, res) => {
   }
 };
 
+// PATCH /api/recepcion/clients/:userId/toggle-active — activar/desactivar cliente
+const toggleClientActive = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const gymId = req.gym.id;
+    const { isActive } = req.body;
+
+    // Verificar que sea un cliente de este gym
+    const client = await db.query(`
+      SELECT u.is_active FROM users u
+      JOIN user_gym_roles ugr ON ugr.user_id = u.id AND ugr.gym_id = $2 AND ugr.role = 'user'
+      WHERE u.id = $1
+    `, [userId, gymId]);
+
+    if (!client.rows.length) return res.status(404).json({ error: 'Cliente no encontrado' });
+
+    // Si se está reactivando, verificar límite del plan
+    if (isActive === true && client.rows[0].is_active === false) {
+      const limitCheck = await canAddUser(gymId);
+      if (!limitCheck.allowed) {
+        return res.status(403).json({ error: `No puedes reactivar este cliente: ${limitCheck.reason}` });
+      }
+    }
+
+    await db.query('UPDATE users SET is_active=$1, updated_at=NOW() WHERE id=$2', [isActive, userId]);
+
+    // Auditoría
+    await db.query(
+      "INSERT INTO receptionists_audit (gym_id, receptionist_id, action, target_user_id) VALUES ($1,$2,$3,$4)",
+      [gymId, req.user.id, isActive ? 'Cliente reactivado' : 'Cliente desactivado', userId]
+    );
+
+    res.json({ message: isActive ? 'Cliente reactivado' : 'Cliente desactivado' });
+  } catch (err) {
+    console.error('Error toggleClientActive:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
 module.exports = {
   getDashboard, getClients, getClientDetail, createClient,
   createMembership, registerPayment, getMemberships, getPayments,
   getSchedules, bookClient, getEnrolled, validateEntry, getAttendance,
-  getMembershipTypes, cancelMembership, getUserMembershipsHistory, getBirthdays, getPlanUsage
+  getMembershipTypes, cancelMembership, getUserMembershipsHistory, getBirthdays, getPlanUsage, toggleClientActive
 };

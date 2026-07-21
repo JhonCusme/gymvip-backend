@@ -246,6 +246,7 @@ router.post('/recepcion/memberships/:membershipId/cancel', ...recepAuth, recepti
 router.get('/recepcion/users/:userId/memberships-history', ...recepAuth, receptionCtrl.getUserMembershipsHistory);
 router.get('/recepcion/birthdays', ...recepAuth, receptionCtrl.getBirthdays);
 router.get('/recepcion/plan-usage', ...recepAuth, receptionCtrl.getPlanUsage);
+router.patch('/recepcion/clients/:userId/toggle-active', ...recepAuth, receptionCtrl.toggleClientActive);
 
 // ============================================================
 // USUARIO / CLIENTE
