@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const db = require('../config/database');
+const { canAddUser } = require('../utils/planLimits');
 
 // GET /api/recepcion/dashboard
 const getDashboard = async (req, res) => {
@@ -150,6 +151,11 @@ const createClient = async (req, res) => {
 
     if (!cedula || !name || !password) {
       return res.status(400).json({ error: 'Cédula, nombre y contraseña son requeridos' });
+    }
+    // Verificar límite del plan
+    const limitCheck = await canAddUser(gymId);
+    if (!limitCheck.allowed) {
+      return res.status(403).json({ error: limitCheck.reason });
     }
 
     // Verificar si ya existe en este gym

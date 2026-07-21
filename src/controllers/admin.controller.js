@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const db = require('../config/database');
 const { decrypt } = require('../utils/crypto');
+const { canAddUser } = require('../utils/planLimits');
 // ============================================================
 // USUARIOS
 // ============================================================
@@ -124,6 +125,14 @@ const createUser = async (req, res) => {
 
     if (!cedula || !name || !password) {
       return res.status(400).json({ error: 'Cédula, nombre y contraseña son requeridos' });
+    }
+
+    // Verificar límite del plan (solo para clientes)
+    if (role === 'user') {
+      const limitCheck = await canAddUser(gymId);
+      if (!limitCheck.allowed) {
+        return res.status(403).json({ error: limitCheck.reason });
+      }
     }
 
     // Verificar si ya existe en este gym
@@ -651,7 +660,9 @@ const getDashboard = async (req, res) => {
 
     const kpis = await db.query(`
       SELECT
-        (SELECT COUNT(*) FROM user_gym_roles ugr WHERE ugr.gym_id=$1 AND ugr.role='user' AND ugr.is_active=TRUE
+        (SELECT COUNT(*) FROM user_gym_roles ugr 
+          JOIN users u ON u.id = ugr.user_id
+          WHERE ugr.gym_id=$1 AND ugr.role='user' AND ugr.is_active=TRUE AND u.is_active=TRUE
           AND ugr.user_id NOT IN (
             SELECT user_id FROM user_gym_roles WHERE gym_id=$1 AND role IN ('admin','instructor','recepcionista') AND is_active=TRUE
           )) as total_users,
