@@ -185,6 +185,7 @@ router.get('/admin/payments', ...adminAuth, adminCtrl.getPayments);
 router.get('/admin/reports', ...adminAuth, adminCtrl.getReports);
 router.get('/admin/attendance', ...adminAuth, adminCtrl.getAttendanceHistory);
 router.get('/admin/reception-audit', ...adminAuth, adminCtrl.getReceptionAudit);
+router.get('/admin/reports/revenue/excel', ...adminAuth, adminCtrl.exportRevenueExcel);
 
 // Validar ingreso
 router.post('/admin/validate-entry', ...adminAuth, adminCtrl.validateEntry);

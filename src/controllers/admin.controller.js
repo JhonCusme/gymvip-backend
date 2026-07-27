@@ -2,6 +2,7 @@ const bcrypt = require('bcryptjs');
 const db = require('../config/database');
 const { decrypt } = require('../utils/crypto');
 const { canAddUser } = require('../utils/planLimits');
+const { generateRevenueExcel } = require('../utils/exportReports');
 // ============================================================
 // USUARIOS
 // ============================================================
@@ -1345,6 +1346,44 @@ const getPlanUsage = async (req, res) => {
     res.status(500).json({ error: 'Error interno' });
   }
 };
+
+// GET /api/admin/reports/revenue/excel — descargar reporte de ingresos en Excel
+const exportRevenueExcel = async (req, res) => {
+  try {
+    const gymId = req.gym.id;
+    const { period = 'month' } = req.query;
+
+    const dateFilter = period === 'year'
+      ? `AND created_at >= DATE_TRUNC('year', NOW())`
+      : `AND created_at >= DATE_TRUNC('month', NOW())`;
+
+    const revenue = await db.query(`
+      SELECT 
+        COALESCE(SUM(amount) FILTER (WHERE method = 'efectivo'), 0) as efectivo,
+        COALESCE(SUM(amount) FILTER (WHERE method IN ('tarjeta','transferencia')), 0) as tarjeta_transfer,
+        COALESCE(SUM(amount) FILTER (WHERE method = 'payphone'), 0) as payphone,
+        COALESCE(SUM(amount), 0) as total
+      FROM payments WHERE gym_id = $1 AND status = 'pagado' ${dateFilter}
+    `, [gymId]);
+
+    const gymInfo = await db.query('SELECT name, primary_color FROM gyms WHERE id = $1', [gymId]);
+
+    const workbook = await generateRevenueExcel(
+      { revenue: revenue.rows[0] },
+      gymInfo.rows[0]
+    );
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="ingresos_${period}_${Date.now()}.xlsx"`);
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('Error exportRevenueExcel:', err.message);
+    res.status(500).json({ error: 'Error al generar el reporte' });
+  }
+};
+
 module.exports = {
   getDashboard, getUsers, getUserDetail, createUser, updateUser, resetUserPassword,
   getMembershipTypes, getMemberships, cancelMembership, createMembershipType, updateMembershipType, deleteMembershipType,
@@ -1353,5 +1392,5 @@ module.exports = {
   getInstructors, createInstructor, updateInstructor, deleteInstructor,
   getReceptionists, createReceptionist,
   getPayments, getReports, getReceptionAudit, getAttendanceHistory, validateEntry,getUserMembershipsHistory, getAttendanceClasses,
-   getAttendanceStudents, correctAttendance, cancelClass, cancelDay, bookStudent, getBirthdays, getPlanUsage
+   getAttendanceStudents, correctAttendance, cancelClass, cancelDay, bookStudent, getBirthdays, getPlanUsage, exportRevenueExcel
 };
