@@ -1,0 +1,42 @@
+VERSION: 2.0
+
+CONTRATO DE DÉBITO AUTOMÁTICO CON COMPROMISO DE PERMANENCIA
+
+Fecha de aceptación: {{FECHA}}
+Establecimiento: {{GYM}}
+Plan contratado: {{PLAN}}
+
+Por medio del presente documento, en mi calidad de titular de la tarjeta, autorizo de manera libre, expresa e informada a {{GYM}}, a través de su procesador de pagos autorizado PayPhone, lo siguiente:
+
+1. ALMACENAMIENTO SEGURO
+Guardar de forma tokenizada y segura los datos de mi tarjeta, cumpliendo los estándares de seguridad PCI DSS. {{GYM}} no almacena directamente los números de mi tarjeta.
+
+2. COBROS RECURRENTES
+Realizar cobros automáticos periódicos por el valor de {{PRECIO_MENSUAL}} correspondiente a mi plan de membresía, en cada fecha de renovación.
+
+3. PRECIO PREFERENCIAL Y COMPROMISO DE PERMANENCIA
+Accedo a un precio preferencial de {{PRECIO_MENSUAL}} en lugar del precio regular de {{PRECIO_LISTA}}, a cambio de comprometerme a mantener mi membresía activa por {{MESES}} meses, desde {{FECHA_INICIO}} hasta {{FECHA_FIN}}.
+
+4. PENALIDAD POR RETIRO ANTICIPADO
+Si decido cancelar el débito automático antes del {{FECHA_FIN}}, acepto pagar una penalidad equivalente al {{PENALIDAD_PCT}}% del valor de las mensualidades pendientes, calculada así:
+
+    meses restantes x {{PRECIO_MENSUAL}} x {{PENALIDAD_PCT}}%
+
+Esta penalidad compensa el descuento otorgado por un compromiso que no se completó. Mientras la penalidad no sea cancelada, no podré adquirir nuevas membresías en el establecimiento. Podré pagarla desde la aplicación o directamente en recepción.
+
+5. CAUSAS JUSTIFICADAS
+La penalidad podrá ser condonada por el establecimiento en casos justificados debidamente comprobados, tales como enfermedad o lesión que impida el entrenamiento, embarazo o cambio de domicilio a otra ciudad.
+
+6. COBROS FALLIDOS
+En caso de que un cobro sea rechazado, autorizo hasta 3 reintentos en días consecutivos. Un rechazo por causas ajenas a mi voluntad, como el vencimiento de la tarjeta, no se considerará retiro anticipado; el establecimiento se pondrá en contacto conmigo para regularizar la situación.
+
+7. AL CUMPLIRSE EL PLAZO
+{{TEXTO_RENOVACION}}
+
+8. REVOCACIÓN
+Puedo revocar esta autorización en cualquier momento desde mi perfil en la aplicación o contactando al establecimiento. Si lo hago antes del {{FECHA_FIN}}, aplica la penalidad descrita en la cláusula 4.
+
+9. NOTIFICACIONES
+Recibiré una notificación por cada cobro realizado, exitoso o fallido, y un aviso antes del vencimiento de mi compromiso.
+
+Declaro que soy el titular legítimo de la tarjeta registrada y que he leído y comprendido los términos de esta autorización. Esta aceptación queda registrada con mi identificación, firma, fecha, hora y dirección IP como evidencia de consentimiento.

@@ -1,6 +1,8 @@
 const axios = require('axios');
 const db = require('../config/database');
 const { encrypt, decrypt } = require('../utils/crypto');
+const { renderContrato, calcularPenalidad, redondear, sumarMeses } = require('../utils/contrato');
+const { registrarRetiro } = require('../utils/compromiso');
 
 const PAYPHONE_CONFIRM_URL = 'https://paymentbox.payphonetodoesposible.com/api/confirm';
 
@@ -27,7 +29,48 @@ const initPayment = async (req, res) => {
       );
       if (!planResult.rows.length) return res.status(404).json({ error: 'Plan no encontrado' });
       const plan = planResult.rows[0];
-      const userDiscountCheck = await db.query('SELECT lost_recurring_discount FROM users WHERE id = $1', [userId]);
+      // Si el plan exige permanencia, se arma el contrato para mostrárselo
+      // ANTES de firmar. Es el mismo texto que quedará guardado.
+      const meses = parseInt(plan.commitment_months || 0);
+      let commitment = null;
+      if (meses > 0) {
+        const desc = parseFloat(plan.recurring_discount || 0);
+        const precioMensual = redondear(
+          desc > 0 ? plan.price * (1 - desc / 100) : plan.price
+        );
+        const tz = req.gym?.timezone || 'America/Guayaquil';
+        const hoyQ = await db.query('SELECT (NOW() AT TIME ZONE $1)::date::text AS d', [tz]);
+        const inicio = hoyQ.rows[0].d;
+        const fin = sumarMeses(inicio, meses);
+        const penaltyPercent = parseFloat(plan.penalty_percent || 0);
+
+        const { version, texto } = renderContrato({
+          gymName: req.gym?.name, planName: plan.name,
+          precioMensual, precioLista: plan.price, meses,
+          penaltyPercent, penaltyRenews: plan.penalty_renews === true,
+          fechaInicio: inicio, fechaFin: fin, timezone: tz,
+        });
+
+        commitment = {
+          months: meses,
+          penaltyPercent,
+          penaltyRenews: plan.penalty_renews === true,
+          monthlyPrice: precioMensual,
+          startDate: inicio,
+          endDate: fin,
+          // Ejemplo concreto: penalidad si se retirara a mitad del plazo
+          penaltyExample: {
+            monthsIn: Math.max(1, Math.round(meses / 2)),
+            amount: calcularPenalidad({
+              mesesRestantes: meses - Math.max(1, Math.round(meses / 2)),
+              precioMensual, penaltyPercent,
+            }),
+          },
+          contractVersion: version,
+          contractText: texto,
+        };
+      }
+
       return res.json({
         plan: {
           name: plan.name,
@@ -35,8 +78,9 @@ const initPayment = async (req, res) => {
           durationValue: plan.duration_value,
           durationUnit: plan.duration_unit,
           recurringDiscount: parseFloat(plan.recurring_discount || 0),
-          lostDiscount: userDiscountCheck.rows[0]?.lost_recurring_discount || false
-        }
+          lostDiscount: false // se conserva por compatibilidad; ya no se penaliza
+        },
+        commitment
       });
     }
 
@@ -68,27 +112,29 @@ const initPayment = async (req, res) => {
     // Generar clientTransactionId único (máx 50 caracteres)
     const clientTransactionId = `MEM-${userId.substring(0, 8)}-${Date.now()}`;
 
-    // Guardar la intención de pago para poder confirmarla después
+    // El precio final debe calcularse ANTES de guardar la intención: el pago
+    // que se registra al confirmar toma su monto de aquí. Si se guardara el
+    // precio de lista, el historial diría $49.99 aunque se cobraran $34.99.
+    const recurringDiscount = parseFloat(plan.recurring_discount || 0);
+    const wantsRecurring = req.query.recurring === 'true';
+
+    // El descuento depende solo de elegir débito recurrente. Un cobro fallido
+    // ya no lo hace perder: el contrato (cláusula 6) promete que un rechazo
+    // ajeno a su voluntad no se penaliza, y el freno ahora es la penalidad
+    // por retiro anticipado, que el socio firmó expresamente.
+    const applyDiscount = wantsRecurring && recurringDiscount > 0;
+    const finalPrice = applyDiscount
+      ? plan.price * (1 - recurringDiscount / 100)
+      : plan.price;
+    // El amount en PayPhone va en centavos (enteros)
+    const amountCents = Math.round(finalPrice * 100);
+
+    // Guardar la intención de pago (con el monto realmente a cobrar)
     await db.query(`
       INSERT INTO payment_intents (client_transaction_id, user_id, gym_id, membership_type_id, amount, status)
       VALUES ($1, $2, $3, $4, $5, 'pending')
       ON CONFLICT (client_transaction_id) DO NOTHING
-    `, [clientTransactionId, userId, gymId, membershipTypeId, plan.price]);
-
-    // El amount en PayPhone va en centavos (enteros)
-    const recurringDiscount = parseFloat(plan.recurring_discount || 0);
-const wantsRecurring = req.query.recurring === 'true';
-
-// Verificar si el usuario perdió el descuento (por fallos previos)
-const userCheck = await db.query('SELECT lost_recurring_discount FROM users WHERE id = $1', [userId]);
-const lostDiscount = userCheck.rows[0]?.lost_recurring_discount || false;
-
-// Aplica descuento solo si quiere recurrente Y no perdió el beneficio
-const applyDiscount = wantsRecurring && recurringDiscount > 0 && !lostDiscount;
-const finalPrice = applyDiscount
-  ? plan.price * (1 - recurringDiscount / 100)
-  : plan.price;
-const amountCents = Math.round(finalPrice * 100);
+    `, [clientTransactionId, userId, gymId, membershipTypeId, (amountCents / 100).toFixed(2)]);
 
     // Devolver parámetros al frontend para renderizar la cajita
     res.json({
@@ -138,9 +184,11 @@ const confirmPayment = async (req, res) => {
     // Buscar la intención de pago
     const intentResult = await db.query(
       `SELECT pi.*, mt.duration_value, mt.duration_unit, mt.name as type_name,
+              mt.price as list_price, mt.commitment_months, mt.penalty_percent, mt.penalty_renews,
+              g.name as gym_name, g.timezone as gym_timezone,
               g.payphone_token, g.payphone_enabled
        FROM payment_intents pi
-       JOIN membership_types mt ON mt.id = pi.membership_type_id
+       LEFT JOIN membership_types mt ON mt.id = pi.membership_type_id
        JOIN gyms g ON g.id = pi.gym_id
        WHERE pi.client_transaction_id = $1`,
       [clientTransactionId]
@@ -219,6 +267,44 @@ if (existingPayment.rows.length) {
   });
 }
 
+    // ---- Pago de una PENALIDAD (no de una membresía) ----
+    if (intent.penalty_id) {
+      const cobrado = Number(payphoneData.amount);
+      const monto = Number.isFinite(cobrado) && cobrado > 0
+        ? (cobrado / 100).toFixed(2)
+        : intent.amount;
+
+      const pago = await db.query(`
+        INSERT INTO payments (gym_id, user_id, amount, method, status, payphone_transaction_id, payphone_response, notes)
+        VALUES ($1, $2, $3, 'payphone', 'pagado', $4, $5, 'Penalidad por retiro anticipado')
+        RETURNING id
+      `, [intent.gym_id, intent.user_id, monto,
+          payphoneData.transactionId?.toString(), JSON.stringify(payphoneData)]);
+
+      await db.query(`
+        UPDATE penalties SET status='paid', payment_id=$1, resolved_at=NOW()
+        WHERE id=$2 AND status='pending'
+      `, [pago.rows[0].id, intent.penalty_id]);
+
+      await db.query(
+        "UPDATE payment_intents SET status='completed', payphone_transaction_id=$1, updated_at=NOW() WHERE id=$2",
+        [payphoneData.transactionId?.toString(), intent.id]
+      );
+
+      await db.query(`
+        INSERT INTO notifications (user_id, gym_id, title, message, type)
+        VALUES ($1, $2, '✅ Penalidad pagada', $3, 'payment')
+      `, [intent.user_id, intent.gym_id,
+          `Tu penalidad de $${Number(monto).toFixed(2)} fue pagada. Ya puedes volver a usar la app y adquirir membresías.`]);
+
+      return res.json({
+        success: true,
+        penaltyPaid: true,
+        amount: parseFloat(monto),
+        message: 'Penalidad pagada. Ya puedes volver a usar la aplicación.',
+      });
+    }
+
     // PAGO APROBADO — Activar membresía (fecha según timezone del gym)
     const tz = req.gym?.timezone || 'America/Guayaquil';
     const tzDate = await db.query(`SELECT (NOW() AT TIME ZONE $1)::date as today`, [tz]);
@@ -264,13 +350,20 @@ const memResult = await db.query(`
   autoRenew
 ]);
 
-    // Registrar pago
+    // Registrar pago — el monto se toma de la respuesta de PayPhone (viene en
+    // centavos), que es la fuente de verdad de lo que realmente se cobró.
+    // Si por algún motivo no viniera, se usa el monto de la intención.
+    const cobradoPayphone = Number(payphoneData.amount);
+    const montoReal = Number.isFinite(cobradoPayphone) && cobradoPayphone > 0
+      ? (cobradoPayphone / 100).toFixed(2)
+      : intent.amount;
+
     await db.query(`
       INSERT INTO payments (gym_id, user_id, membership_id, membership_type_id, amount, method, status, payphone_transaction_id, payphone_response)
       VALUES ($1, $2, $3, $4, $5, 'payphone', 'pagado', $6, $7)
     `, [
       intent.gym_id, intent.user_id, memResult.rows[0].id, intent.membership_type_id,
-      intent.amount, payphoneData.transactionId?.toString(), JSON.stringify(payphoneData)
+      montoReal, payphoneData.transactionId?.toString(), JSON.stringify(payphoneData)
     ]);
 
 if (cardToken) {
@@ -280,11 +373,63 @@ if (cardToken) {
   );
 }
 
-// Si el usuario había perdido el descuento, quitarlo del flag (ya pagó su "penalización")
-    // El siguiente cobro recurrente ya tendrá descuento
-    if (autoRenew) {
-      await db.query('UPDATE users SET lost_recurring_discount = FALSE WHERE id = $1', [intent.user_id]);
-    }
+// ---- Compromiso de permanencia ----
+// Se crea solo si el socio activó el débito automático y el plan exige
+// permanencia. Los términos quedan CONGELADOS: si el gimnasio cambia el
+// porcentaje o los meses después, a este socio se le respeta lo que firmó.
+const mesesCompromiso = parseInt(intent.commitment_months || 0);
+if (autoRenew && mesesCompromiso > 0) {
+  const yaTiene = await db.query(
+    `SELECT id FROM membership_commitments
+     WHERE user_id = $1 AND gym_id = $2 AND status = 'active'`,
+    [intent.user_id, intent.gym_id]
+  );
+
+  if (!yaTiene.rows.length) {
+    const finCompromiso = sumarMeses(startStr, mesesCompromiso);
+    const penaltyPercent = parseFloat(intent.penalty_percent || 0);
+    const datosFirma = await db.query(
+      'SELECT consent_signature_url, consent_ip, consent_version FROM users WHERE id = $1',
+      [intent.user_id]
+    );
+    const firma = datosFirma.rows[0] || {};
+
+    // El texto se genera en el servidor (no lo envía el cliente) para que el
+    // contrato guardado sea exactamente el que corresponde a estos términos.
+    const { version, texto } = renderContrato({
+      gymName: intent.gym_name,
+      planName: intent.type_name,
+      precioMensual: montoReal,
+      precioLista: intent.list_price,
+      meses: mesesCompromiso,
+      penaltyPercent,
+      penaltyRenews: intent.penalty_renews === true,
+      fechaInicio: startStr,
+      fechaFin: finCompromiso,
+      timezone: intent.gym_timezone,
+    });
+
+    await db.query(`
+      INSERT INTO membership_commitments (
+        user_id, gym_id, membership_id, membership_type_id,
+        commitment_months, monthly_price, list_price, penalty_percent, penalty_renews,
+        contract_version, contract_text, signature_url, signed_ip,
+        start_date, end_date, status
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'active')
+    `, [
+      intent.user_id, intent.gym_id, memResult.rows[0].id, intent.membership_type_id,
+      mesesCompromiso, montoReal, intent.list_price, penaltyPercent, intent.penalty_renews === true,
+      firma.consent_version || version, texto, firma.consent_signature_url || null, firma.consent_ip || null,
+      startStr, finCompromiso,
+    ]);
+
+    await db.query(`
+      INSERT INTO notifications (user_id, gym_id, title, message, type)
+      VALUES ($1, $2, 'Compromiso activado', $3, 'membership')
+    `, [intent.user_id, intent.gym_id,
+        `Tu plan con débito automático quedó activo por ${mesesCompromiso} meses a $${Number(montoReal).toFixed(2)} mensuales.`]);
+  }
+}
 
     // Marcar intención como completada
     await db.query(
@@ -409,8 +554,68 @@ const getAutoChargeStatus = async (req, res) => {
 // ============================================================
 // DELETE /api/usuario/payphone/auto-charge — cancelar cobro automático
 // ============================================================
+// ============================================================
+// GET /api/usuario/penalty/init — pagar la penalidad desde la app
+// ============================================================
+// Reutiliza la cajita de PayPhone, pero la intención apunta a la penalidad
+// en vez de a un plan de membresía.
+const initPenaltyPayment = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const gymId = req.gym.id;
+
+    const deudaR = await db.query(
+      "SELECT * FROM penalties WHERE user_id=$1 AND gym_id=$2 AND status='pending' ORDER BY created_at DESC LIMIT 1",
+      [userId, gymId]
+    );
+    if (!deudaR.rows.length) return res.status(404).json({ error: 'No tienes penalidades pendientes' });
+    const deuda = deudaR.rows[0];
+
+    const gymR = await db.query(
+      'SELECT name, payphone_enabled, payphone_store_id, payphone_token FROM gyms WHERE id = $1',
+      [gymId]
+    );
+    const gym = gymR.rows[0];
+    if (!gym.payphone_enabled || !gym.payphone_token || !gym.payphone_store_id) {
+      return res.status(400).json({ error: 'Este gimnasio no tiene pagos en línea habilitados. Acércate a recepción para cancelar tu penalidad.' });
+    }
+
+    const clientTransactionId = `PEN-${userId.substring(0, 8)}-${Date.now()}`;
+    const amountCents = Math.round(parseFloat(deuda.amount) * 100);
+
+    await db.query(`
+      INSERT INTO payment_intents (client_transaction_id, user_id, gym_id, penalty_id, amount, status)
+      VALUES ($1, $2, $3, $4, $5, 'pending')
+      ON CONFLICT (client_transaction_id) DO NOTHING
+    `, [clientTransactionId, userId, gymId, deuda.id, deuda.amount]);
+
+    res.json({
+      token: decrypt(gym.payphone_token),
+      storeId: gym.payphone_store_id,
+      clientTransactionId,
+      amount: amountCents,
+      amountWithoutTax: amountCents,
+      currency: 'USD',
+      reference: `Penalidad por retiro anticipado - ${gym.name}`,
+      lang: 'es',
+      timeZone: -5,
+      phoneNumber: req.user.phone ? `+593${req.user.phone.replace(/^0/, '')}` : undefined,
+      email: req.user.email || undefined,
+      documentId: req.user.cedula,
+      identificationType: 1,
+      penalty: { id: deuda.id, amount: parseFloat(deuda.amount) },
+    });
+  } catch (err) {
+    console.error('Error initPenaltyPayment:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
 const cancelAutoCharge = async (req, res) => {
   try {
+    // Si tenía compromiso vigente, se genera la penalidad antes de dar de baja
+    const deuda = await registrarRetiro(req.user.id, req.gym.id);
+
     await db.query(
       'UPDATE users SET payphone_token = NULL, payphone_consent_signed = FALSE WHERE id = $1',
       [req.user.id]
@@ -419,7 +624,10 @@ const cancelAutoCharge = async (req, res) => {
       "UPDATE memberships SET auto_renew = FALSE WHERE user_id = $1 AND gym_id = $2 AND status = 'active'",
       [req.user.id, req.gym.id]
     );
-    res.json({ message: 'Cobro automático cancelado' });
+    res.json({
+      message: 'Cobro automático cancelado',
+      penalty: deuda ? { amount: parseFloat(deuda.amount), id: deuda.id } : null,
+    });
   } catch (err) {
     res.status(500).json({ error: 'Error interno' });
   }
@@ -454,7 +662,9 @@ const saveGymPayphoneCredentials = async (req, res) => {
 // ============================================================
 // COBRO RECURRENTE — se ejecuta desde el cron job
 // ============================================================
-const processRecurringPayments = async () => {
+// gymId opcional: el cron lo invoca por cada box a las 08:00 de SU hora local,
+// con la zona horaria del box aplicada (así CURRENT_DATE es su "hoy" real).
+const processRecurringPayments = async (gymId = null) => {
   const crypto = require('crypto');
   
  try {
@@ -473,7 +683,12 @@ const processRecurringPayments = async () => {
       JOIN users u ON u.id = m.user_id
       JOIN gyms g ON g.id = m.gym_id
       WHERE m.auto_renew = TRUE
-        AND m.status = 'active'
+        -- Se incluyen las vencidas: tras el primer cobro fallido, a medianoche
+        -- expire_memberships() marca la membresía como 'expired'. Si solo se
+        -- buscaran las activas, los reintentos de los días 2 y 3 nunca correrían.
+        -- No hay riesgo de cobrar dos veces: last_charge_attempt limita a un
+        -- intento por día y un cobro exitoso pone auto_renew = FALSE.
+        AND m.status IN ('active', 'expired')
         AND m.end_date <= CURRENT_DATE
         AND m.end_date >= CURRENT_DATE - INTERVAL '3 days'
         AND m.recurring_failed_attempts < 3
@@ -483,7 +698,8 @@ const processRecurringPayments = async () => {
         AND g.payphone_enabled = TRUE
         AND g.payphone_token IS NOT NULL
         AND g.payphone_coding_password IS NOT NULL
-    `);
+        AND ($1::uuid IS NULL OR m.gym_id = $1)
+    `, [gymId]);
 
     console.log(`[CRON] Procesando ${memberships.rows.length} cobros recurrentes`);
 
@@ -501,7 +717,16 @@ const processRecurringPayments = async () => {
 };
 
         const clientTransactionId = `REC-${mem.user_id.substring(0,8)}-${Date.now()}`;
-        const amountCents = Math.round(parseFloat(mem.price) * 100);
+
+        // El descuento por débito recurrente debe aplicarse en CADA cobro, igual
+        // que en el pago inicial: al usuario se le prometió ese precio "cada vez".
+        // El descuento se mantiene siempre mientras el débito siga activo.
+        const recurringDiscount = parseFloat(mem.recurring_discount || 0);
+        const applyDiscount = recurringDiscount > 0;
+        const finalPrice = applyDiscount
+          ? parseFloat(mem.price) * (1 - recurringDiscount / 100)
+          : parseFloat(mem.price);
+        const amountCents = Math.round(finalPrice * 100);
 
         // Cobrar con cardToken
        const encryptedHolder = encryptCardHolder(mem.user_name, mem.payphone_coding_password);
@@ -586,7 +811,7 @@ const payphoneRes = await axios.post(
             INSERT INTO payments (gym_id, user_id, membership_id, membership_type_id, amount, method, status, payphone_transaction_id)
             VALUES ($1, $2, $3, $4, $5, 'payphone', 'pagado', $6)
           `, [mem.gym_id, mem.user_id, newMem.rows[0].id, mem.membership_type_id,
-              mem.price, data.transactionId?.toString()]);
+              finalPrice.toFixed(2), data.transactionId?.toString()]);
 
           await db.query(`
             INSERT INTO notifications (user_id, gym_id, title, message, type)
@@ -608,9 +833,14 @@ const payphoneRes = await axios.post(
             WHERE id = $3
           `, [newAttempts, cancelAutoRenew, mem.membership_id]);
 
-          // Si se canceló por 3 fallos, marcar pérdida del descuento
           if (cancelAutoRenew) {
-            await db.query('UPDATE users SET lost_recurring_discount = TRUE WHERE id = $1', [mem.user_id]);
+            // Un cobro fallido NO es un retiro voluntario: no se genera penalidad
+            // ni se le quita el descuento (así lo promete la cláusula 6 del contrato).
+            // El compromiso queda "en revisión" para que recepción contacte al socio.
+            await db.query(`
+              UPDATE membership_commitments SET status = 'payment_failed'
+              WHERE user_id = $1 AND gym_id = $2 AND status = 'active'
+            `, [mem.user_id, mem.gym_id]);
           }
 
           const msg = cancelAutoRenew
@@ -636,5 +866,6 @@ console.error(`[CRON] Error PayPhone:`, err.response?.data?.message);     }
 module.exports = {
   initPayment, confirmPayment, paymentResult,
   signConsent, getAutoChargeStatus, cancelAutoCharge,
-  saveGymPayphoneCredentials, processRecurringPayments
+  saveGymPayphoneCredentials, processRecurringPayments,
+  initPenaltyPayment
 };

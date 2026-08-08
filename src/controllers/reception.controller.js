@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const db = require('../config/database');
 const { canAddUser } = require('../utils/planLimits');
+const { permite: permiteFranja } = require('../utils/franjaHoraria');
 
 // GET /api/recepcion/dashboard
 const getDashboard = async (req, res) => {
@@ -13,7 +14,8 @@ const getDashboard = async (req, res) => {
           AND ugr.user_id NOT IN (
             SELECT user_id FROM user_gym_roles WHERE gym_id=$1 AND role IN ('admin','instructor','recepcionista') AND is_active=TRUE
           )) as total_clients,
-        (SELECT COUNT(*) FROM attendance WHERE gym_id=$1 AND DATE(check_in_time)=CURRENT_DATE) as asistencias_hoy,
+        (SELECT COUNT(*) FROM bookings b JOIN class_instances ci ON ci.id=b.class_instance_id
+          WHERE b.gym_id=$1 AND ci.class_date=CURRENT_DATE AND b.status='attended') as asistencias_hoy,
         (SELECT COUNT(DISTINCT ci.id) FROM class_instances ci WHERE ci.gym_id=$1 AND ci.class_date=CURRENT_DATE AND ci.status='scheduled') as clases_hoy,
         (SELECT COALESCE(SUM(amount),0) FROM payments WHERE gym_id=$1 AND status='pagado' AND DATE(created_at)=CURRENT_DATE) as pagos_dia
     `, [gymId]);
@@ -22,7 +24,7 @@ const getDashboard = async (req, res) => {
     const todayClasses = await db.query(`
       SELECT ci.id, ci.class_date, ci.start_time, ci.end_time, ci.max_capacity,
              s.name as session_name, i.name as instructor_name,
-             COUNT(b.id) FILTER (WHERE b.status='confirmed') as booked_count
+             COUNT(b.id) FILTER (WHERE b.status != 'cancelled') as booked_count
       FROM class_instances ci
       JOIN sessions s ON s.id = ci.session_id
       LEFT JOIN instructors i ON i.id = ci.instructor_id
@@ -385,7 +387,7 @@ const getSchedules = async (req, res) => {
       SELECT ci.id, ci.class_date, ci.start_time, ci.end_time, ci.max_capacity, ci.status,
              s.name as session_name, s.duration_minutes,
              i.name as instructor_name,
-             COUNT(b.id) FILTER (WHERE b.status='confirmed') as booked_count
+             COUNT(b.id) FILTER (WHERE b.status != 'cancelled') as booked_count
       FROM class_instances ci
       JOIN sessions s ON s.id = ci.session_id
       LEFT JOIN instructors i ON i.id = ci.instructor_id
@@ -407,6 +409,44 @@ const bookClient = async (req, res) => {
     const { classInstanceId } = req.params;
     const gymId = req.gym.id;
     const { userId } = req.body;
+
+
+    // Aviso si la clase queda fuera de la franja del plan del socio.
+    // No se bloquea: recepción y admin pueden hacerlo para casos puntuales.
+    let avisoFranja = null;
+    try {
+      const chk = await db.query(`
+        SELECT ci.start_time, ci.class_date,
+               mt.booking_start_time, mt.booking_end_time, mt.booking_days,
+               mt.name AS plan_name, mt.sessions_per_week
+        FROM class_instances ci
+        JOIN memberships m ON m.user_id = $2 AND m.gym_id = ci.gym_id
+                          AND m.status = 'active' AND m.end_date >= CURRENT_DATE
+        JOIN membership_types mt ON mt.id = m.membership_type_id
+        WHERE ci.id = $1 LIMIT 1
+      `, [classInstanceId, userId]);
+      if (chk.rows.length) {
+        const f = chk.rows[0];
+        const r = permiteFranja(f, f.start_time, new Date(f.class_date).getUTCDay());
+        if (!r.permitido) {
+          avisoFranja = `El plan "${f.plan_name}" de este socio no cubre este horario. ${r.motivo}.`;
+        }
+        // Aviso también si ya agotó su cupo semanal
+        const cupo = parseInt(f.sessions_per_week || 0);
+        if (cupo > 0) {
+          const u = await db.query(`
+            SELECT COUNT(*)::int AS n FROM bookings b
+            JOIN class_instances ci ON ci.id = b.class_instance_id
+            WHERE b.user_id = $1 AND b.status != 'cancelled'
+              AND date_trunc('week', ci.class_date) = date_trunc('week', $2::date)
+          `, [userId, f.class_date]);
+          if (u.rows[0].n >= cupo) {
+            const msg = `Ya usó sus ${cupo} sesiones de esa semana (plan "${f.plan_name}").`;
+            avisoFranja = avisoFranja ? `${avisoFranja} ${msg}` : msg;
+          }
+        }
+      }
+    } catch { /* el aviso nunca debe impedir la reserva */ }
 
     // Verificar capacidad
     const classResult = await db.query(`
@@ -448,7 +488,7 @@ const bookClient = async (req, res) => {
       VALUES ($1,$2,'Reserva creada',$3,$4)
     `, [gymId, req.user.id, userId, classInstanceId]);
 
-    res.status(201).json({ message: 'Cliente inscrito exitosamente' });
+    res.status(201).json({ message: 'Cliente inscrito exitosamente', warning: avisoFranja });
   } catch (err) {
     console.error('Error bookClient:', err);
     res.status(500).json({ error: 'Error interno' });
@@ -491,7 +531,8 @@ const validateEntry = async (req, res) => {
     const user = userResult.rows[0];
 
     const memResult = await db.query(`
-      SELECT m.id, mt.name as type_name, m.end_date
+      SELECT m.id, mt.name as type_name, m.end_date,
+             mt.booking_start_time, mt.booking_end_time, mt.booking_days
       FROM memberships m JOIN membership_types mt ON mt.id = m.membership_type_id
       WHERE m.user_id=$1 AND m.gym_id=$2 AND m.status='active' AND m.end_date>=CURRENT_DATE
       ORDER BY m.end_date DESC LIMIT 1
@@ -507,15 +548,46 @@ const validateEntry = async (req, res) => {
 
     const membership = memResult.rows[0];
 
+    // Los planes con franja horaria (ej. Promo Matutina) solo permiten
+    // ingresar dentro de su horario. Se usa la hora local del gimnasio.
+    const ahora = await db.query(
+      "SELECT to_char(NOW() AT TIME ZONE $1, 'HH24:MI') AS hora, EXTRACT(DOW FROM NOW() AT TIME ZONE $1)::int AS dow",
+      [req.gym.timezone || 'America/Guayaquil']
+    );
+    const permiso = permiteFranja(membership, ahora.rows[0].hora, ahora.rows[0].dow);
+    // Recepción puede autorizarlo igual enviando force: true. Se registra
+    // quién lo autorizó, para que quede trazabilidad de la excepción.
+    const autorizado = req.body.force === true;
+
+    if (!permiso.permitido && !autorizado) {
+      return res.json({
+        valid: false,
+        user: { name: user.name, cedula: user.cedula },
+        membership: { typeName: membership.type_name, endDate: membership.end_date },
+        error: `Fuera del horario de su plan. ${permiso.motivo}.`,
+        outOfSchedule: true,
+        canForce: true,
+      });
+    }
+
     await db.query(`
       INSERT INTO attendance (gym_id, user_id, membership_id, method, validated_by)
       VALUES ($1,$2,$3,'qr',$4)
     `, [gymId, user.id, membership.id, req.user.id]);
 
+    if (!permiso.permitido && autorizado) {
+      await db.query(`
+        INSERT INTO receptionists_audit (gym_id, receptionist_id, action, target_user_id)
+        VALUES ($1, $2, $3, $4)
+      `, [gymId, req.user.id,
+          `Ingreso autorizado fuera del horario del plan (${membership.type_name})`, user.id]);
+    }
+
     res.json({
       valid: true,
       user: { name: user.name, cedula: user.cedula },
-      membership: { typeName: membership.type_name, endDate: membership.end_date }
+      membership: { typeName: membership.type_name, endDate: membership.end_date },
+      forced: !permiso.permitido && autorizado,
     });
   } catch (err) {
     res.status(500).json({ error: 'Error interno' });

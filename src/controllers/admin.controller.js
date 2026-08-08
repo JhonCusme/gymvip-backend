@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const db = require('../config/database');
 const { decrypt } = require('../utils/crypto');
+const { permite: permiteFranja } = require('../utils/franjaHoraria');
 const { canAddUser } = require('../utils/planLimits');
 const { generateRevenueExcel } = require('../utils/exportReports');
 // ============================================================
@@ -153,7 +154,7 @@ const createUser = async (req, res) => {
     const newUser = await db.query(`
       INSERT INTO users (cedula, name, email, phone, birth_date, emergency_contact_name, emergency_contact_phone, password_hash)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id
-    `, [cedula, name, email, phone, birthDate, emergencyContactName, emergencyContactPhone, hash]);
+    `, [cedula, name, email, phone, birthDate || null, emergencyContactName || null, emergencyContactPhone || null, hash]);
 
     const userId = newUser.rows[0].id;
 
@@ -249,12 +250,19 @@ const getMembershipTypes = async (req, res) => {
 
 const createMembershipType = async (req, res) => {
   try {
-    const { name, description, durationValue, durationUnit, price, sessionsPerWeek, isActive, isPublic, recurringDiscount } = req.body;
+    const { name, description, durationValue, durationUnit, price, sessionsPerWeek, isActive, isPublic,
+            recurringDiscount, commitmentMonths, penaltyPercent, penaltyRenews,
+            bookingStartTime, bookingEndTime, bookingDays } = req.body;
     const result = await db.query(`
-      INSERT INTO membership_types (gym_id, name, description, duration_value, duration_unit, price, sessions_per_week, is_active, is_public, recurring_discount)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      INSERT INTO membership_types (gym_id, name, description, duration_value, duration_unit, price, sessions_per_week, is_active, is_public, recurring_discount,
+                                    commitment_months, penalty_percent, penalty_renews,
+                                    booking_start_time, booking_end_time, booking_days)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       RETURNING *
-    `, [req.gym.id, name, description, durationValue || 1, durationUnit || 'months', price || 0, sessionsPerWeek, isActive !== false, isPublic !== false, recurringDiscount || 0]);
+    `, [req.gym.id, name, description, durationValue || 1, durationUnit || 'months', price || 0, sessionsPerWeek, isActive !== false, isPublic !== false, recurringDiscount || 0,
+        commitmentMonths || 0, penaltyPercent ?? 25, penaltyRenews === true,
+        bookingStartTime || null, bookingEndTime || null,
+        Array.isArray(bookingDays) && bookingDays.length ? bookingDays : null]);
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('Error createMembershipType:', err.message);
@@ -265,7 +273,9 @@ const createMembershipType = async (req, res) => {
 const updateMembershipType = async (req, res) => {
   try {
     const { typeId } = req.params;
-    const { name, description, durationValue, durationUnit, price, sessionsPerWeek, isActive, isPublic, recurringDiscount } = req.body;
+    const { name, description, durationValue, durationUnit, price, sessionsPerWeek, isActive, isPublic,
+            recurringDiscount, commitmentMonths, penaltyPercent, penaltyRenews,
+            bookingStartTime, bookingEndTime, bookingDays } = req.body;
     const result = await db.query(`
       UPDATE membership_types SET
         name = COALESCE($1,name), description = COALESCE($2,description),
@@ -273,9 +283,19 @@ const updateMembershipType = async (req, res) => {
         price = COALESCE($5,price), sessions_per_week = COALESCE($6,sessions_per_week),
         is_active = COALESCE($7,is_active), is_public = COALESCE($8,is_public),
         recurring_discount = COALESCE($9,recurring_discount),
+        commitment_months = COALESCE($10,commitment_months),
+        penalty_percent = COALESCE($11,penalty_percent),
+        penalty_renews = COALESCE($12,penalty_renews),
+        -- Estos tres se envían siempre desde el formulario: NULL significa
+        -- "sin restricción", así que no se puede usar COALESCE.
+        booking_start_time = $13, booking_end_time = $14, booking_days = $15,
         updated_at = NOW()
-      WHERE id = $10 AND gym_id = $11 RETURNING *
-    `, [name, description, durationValue, durationUnit, price, sessionsPerWeek, isActive, isPublic, recurringDiscount, typeId, req.gym.id]);
+      WHERE id = $16 AND gym_id = $17 RETURNING *
+    `, [name, description, durationValue, durationUnit, price, sessionsPerWeek, isActive, isPublic, recurringDiscount,
+        commitmentMonths, penaltyPercent, penaltyRenews,
+        bookingStartTime || null, bookingEndTime || null,
+        Array.isArray(bookingDays) && bookingDays.length ? bookingDays : null,
+        typeId, req.gym.id]);
     if (!result.rows.length) return res.status(404).json({ error: 'Plan no encontrado' });
     res.json(result.rows[0]);
   } catch (err) {
@@ -425,6 +445,55 @@ const createSchedule = async (req, res) => {
     `, [req.gym.id, sessionId, instructorId, dayOfWeek, startTime, endTime]);
     res.status(201).json(result.rows[0]);
   } catch (err) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+const updateSchedule = async (req, res) => {
+  try {
+    const { sessionId, instructorId, dayOfWeek, startTime, endTime } = req.body;
+
+    const current = await db.query('SELECT * FROM schedules WHERE id=$1 AND gym_id=$2', [req.params.scheduleId, req.gym.id]);
+    if (!current.rows.length) return res.status(404).json({ error: 'Horario no encontrado' });
+    const prev = current.rows[0];
+
+    const result = await db.query(`
+      UPDATE schedules SET
+        session_id = COALESCE($1, session_id),
+        instructor_id = $2,
+        day_of_week = COALESCE($3, day_of_week),
+        start_time = COALESCE($4, start_time),
+        end_time = COALESCE($5, end_time)
+      WHERE id = $6 AND gym_id = $7
+      RETURNING *
+    `, [sessionId || null, instructorId || null, dayOfWeek ?? null, startTime || null, endTime || null, req.params.scheduleId, req.gym.id]);
+
+    const updated = result.rows[0];
+
+    // Propagar a las clases futuras ya generadas de este horario
+    await db.query(`
+      UPDATE class_instances SET
+        session_id = $1, instructor_id = $2, start_time = $3, end_time = $4
+      WHERE schedule_id = $5 AND class_date >= CURRENT_DATE AND status = 'scheduled'
+    `, [updated.session_id, updated.instructor_id, updated.start_time, updated.end_time, updated.id]);
+
+    // Si cambió el día de la semana, eliminar instancias futuras sin reservas
+    // que quedaron en el día viejo (las que tienen reservas se dejan para que
+    // el admin decida cancelarlas manualmente)
+    if (dayOfWeek != null && Number(dayOfWeek) !== prev.day_of_week) {
+      await db.query(`
+        DELETE FROM class_instances ci
+        WHERE ci.schedule_id = $1 AND ci.class_date >= CURRENT_DATE AND ci.status = 'scheduled'
+          AND EXTRACT(DOW FROM ci.class_date)::INT != $2
+          AND NOT EXISTS (
+            SELECT 1 FROM bookings b WHERE b.class_instance_id = ci.id AND b.status != 'cancelled'
+          )
+      `, [updated.id, Number(dayOfWeek)]);
+    }
+
+    res.json(updated);
+  } catch (err) {
+    console.error('Error updateSchedule:', err.message);
     res.status(500).json({ error: 'Error interno' });
   }
 };
@@ -700,7 +769,7 @@ const getDashboard = async (req, res) => {
         (SELECT COUNT(*) FROM memberships m WHERE m.gym_id=$1 AND m.status='active' AND m.end_date>=CURRENT_DATE
           AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.membership_id=m.id AND p.method NOT IN ('cortesia','beca'))
         ) as free_members,
-        (SELECT COUNT(*) FROM bookings b JOIN class_instances ci ON ci.id=b.class_instance_id WHERE b.gym_id=$1 AND ci.class_date=CURRENT_DATE AND b.status='confirmed') as reservas_hoy,
+        (SELECT COUNT(*) FROM bookings b JOIN class_instances ci ON ci.id=b.class_instance_id WHERE b.gym_id=$1 AND ci.class_date=CURRENT_DATE AND b.status != 'cancelled') as reservas_hoy,
         (SELECT COUNT(*) FROM memberships WHERE gym_id=$1 AND status='active' AND end_date BETWEEN CURRENT_DATE AND CURRENT_DATE+7) as por_vencer
     `, [gymId]);
 
@@ -1123,6 +1192,27 @@ const correctAttendance = async (req, res) => {
   }
 };
 
+// DELETE /api/admin/attendance/bookings/:bookingId — quitar a un alumno de una clase
+// Se marca como cancelada (no se borra) para conservar el historial: así deja de
+// contar como falta y se libera el cupo.
+const removeBookingFromClass = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const gymId = req.gym.id;
+
+    const result = await db.query(
+      "UPDATE bookings SET status='cancelled' WHERE id=$1 AND gym_id=$2 AND status != 'cancelled' RETURNING id",
+      [bookingId, gymId]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Reserva no encontrada' });
+
+    res.json({ message: 'Alumno eliminado de la clase' });
+  } catch (err) {
+    console.error('Error removeBookingFromClass:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
 // POST /api/admin/classes/:classInstanceId/cancel — cancelar una clase puntual
 const cancelClass = async (req, res) => {
   try {
@@ -1219,6 +1309,44 @@ const bookStudent = async (req, res) => {
 
     if (!userId) return res.status(400).json({ error: 'Selecciona un alumno' });
 
+
+    // Aviso si la clase queda fuera de la franja del plan del socio.
+    // No se bloquea: recepción y admin pueden hacerlo para casos puntuales.
+    let avisoFranja = null;
+    try {
+      const chk = await db.query(`
+        SELECT ci.start_time, ci.class_date,
+               mt.booking_start_time, mt.booking_end_time, mt.booking_days,
+               mt.name AS plan_name, mt.sessions_per_week
+        FROM class_instances ci
+        JOIN memberships m ON m.user_id = $2 AND m.gym_id = ci.gym_id
+                          AND m.status = 'active' AND m.end_date >= CURRENT_DATE
+        JOIN membership_types mt ON mt.id = m.membership_type_id
+        WHERE ci.id = $1 LIMIT 1
+      `, [classInstanceId, userId]);
+      if (chk.rows.length) {
+        const f = chk.rows[0];
+        const r = permiteFranja(f, f.start_time, new Date(f.class_date).getUTCDay());
+        if (!r.permitido) {
+          avisoFranja = `El plan "${f.plan_name}" de este socio no cubre este horario. ${r.motivo}.`;
+        }
+        // Aviso también si ya agotó su cupo semanal
+        const cupo = parseInt(f.sessions_per_week || 0);
+        if (cupo > 0) {
+          const u = await db.query(`
+            SELECT COUNT(*)::int AS n FROM bookings b
+            JOIN class_instances ci ON ci.id = b.class_instance_id
+            WHERE b.user_id = $1 AND b.status != 'cancelled'
+              AND date_trunc('week', ci.class_date) = date_trunc('week', $2::date)
+          `, [userId, f.class_date]);
+          if (u.rows[0].n >= cupo) {
+            const msg = `Ya usó sus ${cupo} sesiones de esa semana (plan "${f.plan_name}").`;
+            avisoFranja = avisoFranja ? `${avisoFranja} ${msg}` : msg;
+          }
+        }
+      }
+    } catch { /* el aviso nunca debe impedir la reserva */ }
+
     // Verificar capacidad
     const classResult = await db.query(`
       SELECT ci.max_capacity, COUNT(b.id) FILTER (WHERE b.status='confirmed') as booked
@@ -1253,7 +1381,7 @@ const bookStudent = async (req, res) => {
       ON CONFLICT (user_id, class_instance_id) DO UPDATE SET status='confirmed'
     `, [gymId, userId, classInstanceId, req.user.id]);
 
-    res.status(201).json({ message: 'Alumno inscrito exitosamente' });
+    res.status(201).json({ message: 'Alumno inscrito exitosamente', warning: avisoFranja });
   } catch (err) {
     console.error('Error bookStudent:', err.message);
     res.status(500).json({ error: 'Error interno' });
@@ -1388,9 +1516,9 @@ module.exports = {
   getDashboard, getUsers, getUserDetail, createUser, updateUser, resetUserPassword,
   getMembershipTypes, getMemberships, cancelMembership, createMembershipType, updateMembershipType, deleteMembershipType,
   activateMembership, getSessions, createSession, updateSession, deleteSession,
-  getSchedules, createSchedule, deleteSchedule,
+  getSchedules, createSchedule, updateSchedule, deleteSchedule,
   getInstructors, createInstructor, updateInstructor, deleteInstructor,
   getReceptionists, createReceptionist,
   getPayments, getReports, getReceptionAudit, getAttendanceHistory, validateEntry,getUserMembershipsHistory, getAttendanceClasses,
-   getAttendanceStudents, correctAttendance, cancelClass, cancelDay, bookStudent, getBirthdays, getPlanUsage, exportRevenueExcel
+   getAttendanceStudents, correctAttendance, removeBookingFromClass, cancelClass, cancelDay, bookStudent, getBirthdays, getPlanUsage, exportRevenueExcel
 };

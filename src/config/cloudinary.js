@@ -11,7 +11,9 @@ const gymLogoStorage = new CloudinaryStorage({
   cloudinary,
   params: {
     folder: 'gymvip/logos',
-    allowed_formats: ['jpg', 'jpeg', 'png', 'webp', 'svg'],
+    // Sin SVG a propósito: un SVG puede llevar código ejecutable dentro.
+    // Para un logo, PNG/JPG/WebP cubren todos los casos.
+    allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
     transformation: [{ width: 400, height: 400, crop: 'fit' }]
   }
 });

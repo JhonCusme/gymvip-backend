@@ -115,7 +115,10 @@ const loadGym = async (req, res, next) => {
     }
 
     req.gym = gym;
-    next();
+
+    // A partir de aquí, todas las consultas de esta petición usan la zona
+    // horaria del box (CURRENT_DATE = "hoy" en su país, no en el servidor).
+    return db.runWithTimezone(gym.timezone, () => next());
   } catch (err) {
     console.error('Error en loadGym:', err);
     res.status(500).json({ error: 'Error interno del servidor' });

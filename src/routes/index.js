@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate, requireRole, requireSuperAdmin, loadGym, requireAdminOrHeadCoach, requireStaffForWod } = require('../middleware/auth');
+const { bloquearCompraConDeuda, bloquearAppConDeuda } = require('../middleware/deuda');
 const { uploadGymLogo, uploadInstructorPhoto } = require('../config/cloudinary');
 const db = require('../config/database');
 
@@ -11,6 +12,7 @@ const receptionCtrl = require('../controllers/reception.controller');
 const userCtrl = require('../controllers/user.controller');
 const instrCtrl = require('../controllers/instructor.controller');
 const payphoneCtrl = require('../controllers/payphone.controller');
+const penaltiesCtrl = require('../controllers/penalties.controller');
 
 // ============================================================
 // AUTH
@@ -19,6 +21,20 @@ router.post('/auth/login', authCtrl.login);
 router.get('/auth/me', authenticate, loadGym, authCtrl.getMe);
 router.post('/auth/change-password', authenticate, authCtrl.changePassword);
 
+
+// Telemetría de errores del cliente (para diagnosticar crashes en dispositivos)
+router.post('/client-error', (req, res) => {
+  try {
+    const { type, message, stack, source, componentStack, url, ua, standalone } = req.body || {};
+    console.error('[CLIENT-ERROR]', JSON.stringify({
+      type, message: String(message || '').slice(0, 300),
+      source, url, ua: String(ua || '').slice(0, 200), standalone,
+      stack: String(stack || '').slice(0, 800),
+      componentStack: String(componentStack || '').slice(0, 400),
+    }));
+  } catch { /* nunca fallar */ }
+  res.json({ ok: true });
+});
 
 // Manifest dinámico por gym
 router.get('/gym/:slug/manifest.json', async (req, res) => {
@@ -33,29 +49,42 @@ router.get('/gym/:slug/manifest.json', async (req, res) => {
     }
     
     const gym = result.rows[0];
+
+    // Generar íconos PNG del tamaño exacto usando transformaciones de Cloudinary.
+    // El logo original puede ser JPG de cualquier tamaño; el manifest exige
+    // PNG cuadrado del tamaño declarado o el navegador lo ignora.
+    const cloudinaryIcon = (transform) =>
+      gym.logo_url && gym.logo_url.includes('/upload/')
+        ? gym.logo_url.replace('/upload/', `/upload/${transform}/`)
+        : null;
+
+    const icon192 = cloudinaryIcon('w_192,h_192,c_pad,b_white,f_png');
+    const icon512 = cloudinaryIcon('w_512,h_512,c_pad,b_white,f_png');
+    // Maskable: el contenido debe quedar dentro del 80% central (zona segura)
+    const maskable512 = cloudinaryIcon('w_384,h_384,c_pad,b_white/c_lpad,w_512,h_512,b_white,f_png');
+
+    const icons = icon192
+      ? [
+          { src: icon192, sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: icon512, sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: maskable512, sizes: '512x512', type: 'image/png', purpose: 'maskable' }
+        ]
+      : [{ src: '/favicon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }];
+
     const manifest = {
       name: gym.name,
       short_name: gym.name.substring(0, 12),
       description: `App de ${gym.name} - Gestiona tu membresía y reservas`,
+      id: `/login?gym=${req.params.slug}`,
       start_url: `/login?gym=${req.params.slug}`,
+      scope: '/',
+      lang: 'es',
+      dir: 'ltr',
       display: 'standalone',
       background_color: '#0a0a0a',
       theme_color: gym.primary_color || '#E85D04',
       orientation: 'portrait',
-      icons: [
-        {
-          src: gym.logo_url || '/icon-192.png',
-          sizes: '192x192',
-          type: 'image/png',
-          purpose: 'any maskable'
-        },
-        {
-          src: gym.logo_url || '/icon-512.png',
-          sizes: '512x512',
-          type: 'image/png',
-          purpose: 'any maskable'
-        }
-      ]
+      icons
     };
     
     res.setHeader('Content-Type', 'application/manifest+json');
@@ -158,12 +187,14 @@ router.delete('/admin/sessions/:sessionId', ...adminAuth, adminCtrl.deleteSessio
 // Horarios
 router.get('/admin/schedules', ...adminAuth, adminCtrl.getSchedules);
 router.post('/admin/schedules', ...adminAuth, adminCtrl.createSchedule);
+router.put('/admin/schedules/:scheduleId', ...adminAuth, adminCtrl.updateSchedule);
 router.delete('/admin/schedules/:scheduleId', ...adminAuth, adminCtrl.deleteSchedule);
 
 // Asistencia
 router.get('/admin/attendance/classes', ...adminAuth, adminCtrl.getAttendanceClasses);
 router.get('/admin/attendance/classes/:classInstanceId/students', ...adminAuth, adminCtrl.getAttendanceStudents);
 router.post('/admin/attendance/bookings/:bookingId', ...adminAuth, adminCtrl.correctAttendance);
+router.delete('/admin/attendance/bookings/:bookingId', ...adminAuth, adminCtrl.removeBookingFromClass);
 router.post('/admin/classes/:classInstanceId/cancel', ...adminAuth, adminCtrl.cancelClass);
 router.post('/admin/classes/cancel-day', ...adminAuth, adminCtrl.cancelDay);
 router.post('/admin/schedules/:classInstanceId/book', ...adminAuth, adminCtrl.bookStudent);
@@ -183,6 +214,12 @@ router.get('/admin/payments', ...adminAuth, adminCtrl.getPayments);
 
 // Reportes
 router.get('/admin/reports', ...adminAuth, adminCtrl.getReports);
+// Penalidades — el admin además puede condonarlas
+router.get('/admin/penalties', ...adminAuth, penaltiesCtrl.getPenalties);
+router.post('/admin/penalties/:penaltyId/collect', ...adminAuth, penaltiesCtrl.collectPenalty);
+router.post('/admin/penalties/:penaltyId/waive', ...adminAuth, penaltiesCtrl.waivePenalty);
+router.get('/admin/commitments/at-risk', ...adminAuth, penaltiesCtrl.getCommitmentsAtRisk);
+
 router.get('/admin/attendance', ...adminAuth, adminCtrl.getAttendanceHistory);
 router.get('/admin/reception-audit', ...adminAuth, adminCtrl.getReceptionAudit);
 router.get('/admin/reports/revenue/excel', ...adminAuth, adminCtrl.exportRevenueExcel);
@@ -245,6 +282,11 @@ router.get('/recepcion/attendance', ...recepAuth, receptionCtrl.getAttendance);
 router.get('/recepcion/membership-types', ...recepAuth, receptionCtrl.getMembershipTypes);
 router.post('/recepcion/memberships/:membershipId/cancel', ...recepAuth, receptionCtrl.cancelMembership);
 router.get('/recepcion/users/:userId/memberships-history', ...recepAuth, receptionCtrl.getUserMembershipsHistory);
+// Penalidades — recepción puede consultarlas y cobrarlas (no condonarlas)
+router.get('/recepcion/penalties', ...recepAuth, penaltiesCtrl.getPenalties);
+router.post('/recepcion/penalties/:penaltyId/collect', ...recepAuth, penaltiesCtrl.collectPenalty);
+router.get('/recepcion/commitments/at-risk', ...recepAuth, penaltiesCtrl.getCommitmentsAtRisk);
+
 router.get('/recepcion/birthdays', ...recepAuth, receptionCtrl.getBirthdays);
 router.get('/recepcion/plan-usage', ...recepAuth, receptionCtrl.getPlanUsage);
 router.patch('/recepcion/clients/:userId/toggle-active', ...recepAuth, receptionCtrl.toggleClientActive);
@@ -255,25 +297,34 @@ router.patch('/recepcion/clients/:userId/toggle-active', ...recepAuth, reception
 const userAuth = [authenticate, loadGym, requireRole('user', 'admin', 'super_admin')];
 
 router.get('/usuario/home', ...userAuth, userCtrl.getHome);
-router.get('/usuario/schedule', ...userAuth, userCtrl.getSchedule);
-router.post('/usuario/schedule/:classInstanceId/book', ...userAuth, userCtrl.bookClass);
-router.get('/usuario/bookings', ...userAuth, userCtrl.getMyBookings);
-router.get('/usuario/qr', ...userAuth, userCtrl.getMyQR);
+// Estado del compromiso y deuda: nunca se bloquea, es lo que necesita ver
+// el socio para poder pagar y desbloquearse
+router.get('/usuario/commitment', ...userAuth, userCtrl.getCommitment);
+router.post('/usuario/commitment/renewal', ...userAuth, userCtrl.answerRenewal);
+// Pagar la penalidad desde la app (tampoco se bloquea, es la vía de salida)
+router.get('/usuario/penalty/init', ...userAuth, payphoneCtrl.initPenaltyPayment);
+router.get('/usuario/schedule', ...userAuth, bloquearAppConDeuda, userCtrl.getSchedule);
+router.post('/usuario/schedule/:classInstanceId/book', ...userAuth, bloquearAppConDeuda, userCtrl.bookClass);
+router.get('/usuario/bookings', ...userAuth, bloquearAppConDeuda, userCtrl.getMyBookings);
+router.get('/usuario/qr', ...userAuth, bloquearAppConDeuda, userCtrl.getMyQR);
 router.get('/usuario/profile', ...userAuth, userCtrl.getProfile);
 router.put('/usuario/profile', ...userAuth, userCtrl.updateProfile);
 router.get('/usuario/payment-history', ...userAuth, userCtrl.getPaymentHistory);
 router.get('/usuario/notifications', ...userAuth, userCtrl.getNotifications);
-router.get('/usuario/membership-plans', ...userAuth, userCtrl.getMembershipPlans);
-router.get('/usuario/wod', ...userAuth, userCtrl.getTodayWod);
+router.get('/usuario/membership-plans', ...userAuth, bloquearCompraConDeuda, userCtrl.getMembershipPlans);
+router.get('/usuario/wod', ...userAuth, bloquearAppConDeuda, userCtrl.getTodayWod);
 router.post('/usuario/cancel-auto-renew', ...userAuth, userCtrl.cancelAutoRenew);
-router.post('/usuario/bookings/:bookingId/cancel', ...userAuth, userCtrl.cancelBooking);
-router.get('/usuario/prs', ...userAuth, userCtrl.getPRs);
-router.post('/usuario/prs', ...userAuth, userCtrl.savePR);
-router.delete('/usuario/prs/:id', ...userAuth, userCtrl.deletePR);
+router.post('/usuario/bookings/:bookingId/cancel', ...userAuth, bloquearAppConDeuda, userCtrl.cancelBooking);
+router.get('/usuario/prs', ...userAuth, bloquearAppConDeuda, userCtrl.getPRs);
+router.post('/usuario/prs', ...userAuth, bloquearAppConDeuda, userCtrl.savePR);
+router.delete('/usuario/prs/:id', ...userAuth, bloquearAppConDeuda, userCtrl.deletePR);
+router.get('/usuario/weights', ...userAuth, bloquearAppConDeuda, userCtrl.getWeights);
+router.post('/usuario/weights', ...userAuth, bloquearAppConDeuda, userCtrl.saveWeight);
+router.delete('/usuario/weights/:id', ...userAuth, bloquearAppConDeuda, userCtrl.deleteWeight);
 
 
 // PayPhone — Cajita de Pagos (flujo correcto según documentación oficial)
-router.get('/usuario/payphone/init', ...userAuth, payphoneCtrl.initPayment);
+router.get('/usuario/payphone/init', ...userAuth, bloquearCompraConDeuda, payphoneCtrl.initPayment);
 router.post('/usuario/payphone/confirm', ...userAuth, payphoneCtrl.confirmPayment);
 router.post('/usuario/payphone/consent', ...userAuth, payphoneCtrl.signConsent);
 router.get('/usuario/payphone/auto-charge', ...userAuth, payphoneCtrl.getAutoChargeStatus);
@@ -377,7 +428,7 @@ router.delete('/admin/wods/:date', ...wodAuth, async (req, res) => {
   }
 });
 
-router.get('/usuario/wod', ...userAuth, async (req, res) => {
+router.get('/usuario/wod', ...userAuth, bloquearAppConDeuda, async (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
     const result = await db.query(
