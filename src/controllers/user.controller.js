@@ -1,6 +1,9 @@
 const db = require('../config/database');
 const QRCode = require('qrcode');
 const axios = require('axios');
+const { compromisoActivo, calcularBaja, deudaPendiente, registrarRetiro, renovacionPendiente, responderRenovacion } = require('../utils/compromiso');
+ const { redondear } = require('../utils/contrato');
+const { permite: permiteFranja, describir: describirFranja } = require('../utils/franjaHoraria');
 
 // GET /api/usuario/home
 const getHome = async (req, res) => {
@@ -80,13 +83,28 @@ try {
   console.error('Error generando instancias:', genErr.message);
 }
 
-// Verificar membresía
-console.log('Verificando membresía...');
+// Verificar membresía (y traer la franja horaria que permite su plan)
 const hasMembership = await db.query(`
-  SELECT id FROM memberships
-  WHERE user_id=$1 AND gym_id=$2 AND status='active' AND end_date>=CURRENT_DATE LIMIT 1
+  SELECT m.id, mt.booking_start_time, mt.booking_end_time, mt.booking_days, mt.sessions_per_week
+  FROM memberships m
+  JOIN membership_types mt ON mt.id = m.membership_type_id
+  WHERE m.user_id=$1 AND m.gym_id=$2 AND m.status='active' AND m.end_date>=CURRENT_DATE LIMIT 1
 `, [userId, gymId]);
-console.log('Membresía encontrada:', hasMembership.rows.length);
+const planDelSocio = hasMembership.rows[0] || null;
+
+// Cupo semanal: cuántas sesiones lleva agendadas en la semana de esta fecha
+let cupoSemanal = null;
+const cupoPlan = parseInt(planDelSocio?.sessions_per_week || 0);
+if (cupoPlan > 0) {
+  const usadas = await db.query(`
+    SELECT COUNT(*)::int AS n
+    FROM bookings b
+    JOIN class_instances ci ON ci.id = b.class_instance_id
+    WHERE b.user_id = $1 AND b.gym_id = $2 AND b.status != 'cancelled'
+      AND date_trunc('week', ci.class_date) = date_trunc('week', $3::date)
+  `, [userId, gymId, date]);
+  cupoSemanal = { limite: cupoPlan, usadas: usadas.rows[0].n, disponibles: Math.max(0, cupoPlan - usadas.rows[0].n) };
+}
 
 console.log('Obteniendo config del gym...');
 const gymConfig = await db.query(
@@ -124,9 +142,20 @@ AND (ci.class_date > CURRENT_DATE OR ci.end_time > CURRENT_TIME)
 `, [gymId, date, userId]);
 console.log('Clases encontradas:', classes.rows.length);
 
+// Marcar qué clases puede agendar según la franja de su plan.
+// Se envían todas: la app las muestra atenuadas con el motivo, para que el
+// socio entienda por qué no puede y sepa que existe un plan que sí las incluye.
+const dow = new Date(date + 'T12:00:00Z').getUTCDay();
+const clasesConPermiso = classes.rows.map((c) => {
+  const r = permiteFranja(planDelSocio, c.start_time, dow);
+  return { ...c, allowed: r.permitido, restriction_reason: r.motivo || null };
+});
+
 res.json({
-  classes: classes.rows,
-  hasMembership: hasMembership.rows.length > 0,
+  classes: clasesConPermiso,
+  hasMembership: !!planDelSocio,
+  planRestriction: describirFranja(planDelSocio),
+  weeklyQuota: cupoSemanal,
   advanceDays
 });
   } catch (err) {
@@ -141,10 +170,13 @@ const bookClass = async (req, res) => {
     const userId = req.user.id;
     const gymId = req.gym.id;
 
-    // Verificar membresía activa
+    // Verificar membresía activa (con la franja horaria y el cupo semanal de su plan)
     const mem = await db.query(`
-      SELECT id FROM memberships
-      WHERE user_id=$1 AND gym_id=$2 AND status='active' AND end_date>=CURRENT_DATE LIMIT 1
+      SELECT m.id, mt.booking_start_time, mt.booking_end_time, mt.booking_days,
+             mt.sessions_per_week, mt.name AS plan_name
+      FROM memberships m
+      JOIN membership_types mt ON mt.id = m.membership_type_id
+      WHERE m.user_id=$1 AND m.gym_id=$2 AND m.status='active' AND m.end_date>=CURRENT_DATE LIMIT 1
     `, [userId, gymId]);
 
     if (!mem.rows.length) {
@@ -167,6 +199,32 @@ const bookClass = async (req, res) => {
 
     if (nowLocal > classStart) {
       return res.status(400).json({ error: 'No puedes reservar una clase que ya comenzó' });
+    }
+
+    // La clase debe caer dentro de la franja que permite su plan
+    const dowClase = new Date(clsCheck.rows[0].class_date).getUTCDay();
+    const permiso = permiteFranja(mem.rows[0], clsCheck.rows[0].start_time, dowClase);
+    if (!permiso.permitido) {
+      return res.status(400).json({ error: `No puedes agendar esta clase. ${permiso.motivo}.` });
+    }
+
+    // Cupo semanal del plan (ej. "3 sesiones por semana").
+    // La semana va de lunes a domingo, según la del día de la clase.
+    const cupo = parseInt(mem.rows[0].sessions_per_week || 0);
+    if (cupo > 0) {
+      const usadas = await db.query(`
+        SELECT COUNT(*)::int AS n
+        FROM bookings b
+        JOIN class_instances ci ON ci.id = b.class_instance_id
+        WHERE b.user_id = $1 AND b.gym_id = $2 AND b.status != 'cancelled'
+          AND date_trunc('week', ci.class_date) = date_trunc('week', $3::date)
+      `, [userId, gymId, clsCheck.rows[0].class_date]);
+
+      if (usadas.rows[0].n >= cupo) {
+        return res.status(400).json({
+          error: `Tu plan "${mem.rows[0].plan_name}" incluye ${cupo} ${cupo === 1 ? 'sesión' : 'sesiones'} por semana y ya las agendaste todas. Cancela una reserva de esa semana si quieres cambiarla.`,
+        });
+      }
     }
 
     // Verificar capacidad
@@ -583,13 +641,20 @@ const cancelAutoRenew = async (req, res) => {
       return res.status(400).json({ error: 'No tienes un cobro automático activo' });
     }
 
-    // Notificación de confirmación
-    await db.query(`
-      INSERT INTO notifications (user_id, gym_id, title, message, type)
-      VALUES ($1, $2, 'Cobro automático cancelado', $3, 'payment')
-    `, [userId, gymId, 'Has cancelado tu renovación automática. Tu membresía actual sigue activa hasta su fecha de vencimiento, pero no se renovará automáticamente.']);
+    // Si tenía compromiso vigente, se genera la penalidad
+    const deuda = await registrarRetiro(userId, gymId);
 
-    res.json({ message: 'Cobro automático cancelado exitosamente' });
+    if (!deuda) {
+      await db.query(`
+        INSERT INTO notifications (user_id, gym_id, title, message, type)
+        VALUES ($1, $2, 'Cobro automático cancelado', $3, 'payment')
+      `, [userId, gymId, 'Has cancelado tu renovación automática. Tu membresía actual sigue activa hasta su fecha de vencimiento, pero no se renovará automáticamente.']);
+    }
+
+    res.json({
+      message: 'Cobro automático cancelado exitosamente',
+      penalty: deuda ? { amount: parseFloat(deuda.amount), id: deuda.id } : null,
+    });
   } catch (err) {
     console.error('Error cancelAutoRenew:', err.message);
     res.status(500).json({ error: 'Error interno' });
@@ -683,11 +748,137 @@ const deletePR = async (req, res) => {
   }
 };
 
+// GET /api/usuario/commitment — estado del compromiso y costo de cancelar hoy
+const getCommitment = async (req, res) => {
+  try {
+    const compromiso = await compromisoActivo(req.user.id, req.gym.id);
+    const deuda = await deudaPendiente(req.user.id, req.gym.id);
+    const renovacion = await renovacionPendiente(req.user.id, req.gym.id);
+
+    res.json({
+      commitment: compromiso ? {
+        id: compromiso.id,
+        months: compromiso.commitment_months,
+        monthlyPrice: parseFloat(compromiso.monthly_price),
+        penaltyPercent: parseFloat(compromiso.penalty_percent),
+        penaltyRenews: compromiso.penalty_renews,
+        startDate: compromiso.start_date_txt || compromiso.start_date,
+        endDate: compromiso.end_date_txt || compromiso.end_date,
+        planName: compromiso.plan_name,
+        contractText: compromiso.contract_text,
+        contractVersion: compromiso.contract_version,
+        signedAt: compromiso.signed_at,
+      } : null,
+      // Lo que costaría cancelar hoy (null si ya cumplió o no tiene compromiso)
+      cancelCost: calcularBaja(compromiso),
+      pendingPenalty: deuda ? {
+        id: deuda.id,
+        amount: parseFloat(deuda.amount),
+        monthsRemaining: deuda.months_remaining,
+        monthlyPrice: parseFloat(deuda.monthly_price),
+        penaltyPercent: parseFloat(deuda.penalty_percent),
+        createdAt: deuda.created_at,
+      } : null,
+      // Solo aparece si el plan renueva la permanencia y aún no ha respondido
+      pendingRenewal: renovacion ? {
+        id: renovacion.id,
+        endDate: renovacion.end_date_txt,
+        planName: renovacion.plan_name,
+        newMonths: parseInt(renovacion.meses_nuevos || 0),
+        newPenaltyPercent: parseFloat(renovacion.penalidad_nueva || 0),
+        newMonthlyPrice: redondear(
+          renovacion.recurring_discount > 0
+            ? renovacion.precio_lista * (1 - renovacion.recurring_discount / 100)
+            : renovacion.precio_lista
+        ),
+        alreadyEnded: new Date(renovacion.end_date_txt + 'T12:00:00Z') < new Date(),
+      } : null,
+    });
+  } catch (err) {
+    console.error('Error getCommitment:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// POST /api/usuario/commitment/renewal — responder si desea continuar
+const answerRenewal = async (req, res) => {
+  try {
+    const { answer, signature } = req.body;
+    if (!['si', 'no'].includes(answer)) {
+      return res.status(400).json({ error: 'Respuesta inválida' });
+    }
+    // Aceptar un nuevo período con penalidad exige firma, igual que la primera vez
+    if (answer === 'si' && !signature) {
+      return res.status(400).json({ error: 'Debes firmar para renovar tu compromiso' });
+    }
+
+    const r = await responderRenovacion(req.user.id, req.gym.id, answer, {
+      signature: signature || null,
+      ip: req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip,
+      gymName: req.gym.name,
+      timezone: req.gym.timezone,
+    });
+
+    if (r.error) return res.status(400).json({ error: r.error });
+    res.json(r);
+  } catch (err) {
+    console.error('Error answerRenewal:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// GET /api/usuario/weights — historial de peso corporal
+const getWeights = async (req, res) => {
+  try {
+    const result = await db.query(
+      'SELECT id, weight, unit, created_at FROM user_weights WHERE user_id=$1 ORDER BY created_at DESC LIMIT 100',
+      [req.user.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error getWeights:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// POST /api/usuario/weights — registrar peso corporal
+const saveWeight = async (req, res) => {
+  try {
+    const { weight, unit } = req.body;
+    const w = parseFloat(weight);
+    if (!w || w <= 0) return res.status(400).json({ error: 'Ingresa un peso válido' });
+    if (w > 700) return res.status(400).json({ error: 'Peso fuera de rango' });
+    if (!['kg', 'lb'].includes(unit)) return res.status(400).json({ error: 'Unidad inválida' });
+
+    const result = await db.query(
+      'INSERT INTO user_weights (user_id, gym_id, weight, unit) VALUES ($1,$2,$3,$4) RETURNING id, weight, unit, created_at',
+      [req.user.id, req.gym.id, w, unit]
+    );
+    res.json({ message: 'Peso registrado', record: result.rows[0] });
+  } catch (err) {
+    console.error('Error saveWeight:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
+// DELETE /api/usuario/weights/:id — eliminar un registro de peso
+const deleteWeight = async (req, res) => {
+  try {
+    await db.query('DELETE FROM user_weights WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    res.json({ message: 'Registro eliminado' });
+  } catch (err) {
+    console.error('Error deleteWeight:', err.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+};
+
 module.exports = {
   getHome, getSchedule, bookClass, cancelBooking, getMyBookings,
   getMyQR, getProfile, updateProfile, getPaymentHistory,
   getNotifications, getMembershipPlans,
   initiatePayphonePayment, signAutoChargeConsent,
   getAutoChargeStatus, cancelAutoCharge,
-  getTodayWod, paymentResult, cancelAutoRenew, getPRs, savePR, deletePR
+  getTodayWod, paymentResult, cancelAutoRenew, getPRs, savePR, deletePR,
+  getWeights, saveWeight, deleteWeight,
+  getCommitment, answerRenewal
 };

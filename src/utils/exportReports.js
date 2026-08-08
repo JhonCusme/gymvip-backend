@@ -56,4 +56,58 @@ async function generateRevenueExcel(data, gym) {
   return workbook;
 }
 
-module.exports = { generateRevenueExcel };
+// Genera un Excel de la lista de miembros
+async function generateMembersExcel(members, gym) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = gym.name || 'GymVIP';
+  workbook.created = new Date();
+
+  const sheet = workbook.addWorksheet('Miembros');
+  const primaryColor = (gym.primary_color || '#E85D04').replace('#', '');
+
+  // Título
+  sheet.mergeCells('A1:E1');
+  const titleCell = sheet.getCell('A1');
+  titleCell.value = `Lista de Miembros — ${gym.name || ''}`;
+  titleCell.font = { size: 16, bold: true, color: { argb: 'FF' + primaryColor } };
+  titleCell.alignment = { horizontal: 'center' };
+
+  sheet.mergeCells('A2:E2');
+  const dateCell = sheet.getCell('A2');
+  dateCell.value = `Generado: ${new Date().toLocaleDateString('es-EC')} · Total: ${members.length} miembros`;
+  dateCell.font = { size: 10, italic: true, color: { argb: 'FF888888' } };
+  dateCell.alignment = { horizontal: 'center' };
+
+  sheet.addRow([]);
+
+  // Encabezados
+  const headerRow = sheet.addRow(['Nombre', 'Cédula', 'Teléfono', 'Membresía', 'Estado']);
+  headerRow.eachCell(cell => {
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + primaryColor } };
+  });
+
+  // Filas de miembros
+  members.forEach(m => {
+    const row = sheet.addRow([
+      m.name || '',
+      m.cedula || '',
+      m.phone || '',
+      m.membership_name || 'Sin membresía',
+      m.membership_status === 'active' ? 'Activa' : 'Sin membresía'
+    ]);
+    // Colorear el estado
+    const statusCell = row.getCell(5);
+    statusCell.font = { color: { argb: m.membership_status === 'active' ? 'FF16A34A' : 'FFDC2626' } };
+  });
+
+  // Anchos
+  sheet.getColumn(1).width = 28;
+  sheet.getColumn(2).width = 15;
+  sheet.getColumn(3).width = 15;
+  sheet.getColumn(4).width = 20;
+  sheet.getColumn(5).width = 16;
+
+  return workbook;
+}
+module.exports = { generateRevenueExcel, generateMembersExcel };
